@@ -19,7 +19,7 @@ src/engine/process/env.ts
 src/engine/process/lines.ts
 src/engine/process/spawn.ts
 src/engine/process/shell.ts
-test/unit/process/*.test.ts
+src/engine/process/*.test.ts     one per module, next to it
 ```
 
 ## env.ts

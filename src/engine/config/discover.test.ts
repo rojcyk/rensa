@@ -2,9 +2,9 @@ import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type ChainFile, discover } from '../../../src/engine/config/discover.js'
-import { RensaError } from '../../../src/engine/errors.js'
-import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../helpers/tmpRepo.js'
+import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../testing/tmpRepo.js'
+import { RensaError } from '../errors.js'
+import { type ChainFile, discover } from './discover.js'
 
 let repo: TmpRepo
 let home: TmpDir

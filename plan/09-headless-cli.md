@@ -94,18 +94,34 @@ src/cli/headless.ts
 src/cli/doctor.ts
 src/cli/format.ts          line formatting shared with doctor
 src/cli/main.ts            dispatch
-test/unit/cli/args.test.ts
-test/integration/cli/run.test.ts     spawns the built CLI with RENSA_DEV=1 against a tmp repo and a fake-provider chain
+src/cli/args.test.ts       colocated
+test/e2e/run.test.ts       e2e: spawns the built CLI with RENSA_DEV=1 against a tmp repo and a fake-provider chain
+test/e2e/doctor.test.ts    e2e: spawns `rensa doctor` the same way
+vitest.e2e.config.ts       include `test/e2e/**/*.test.ts`, environment node
 ```
+
+These are the first end-to-end tests (see "Where tests live" in
+`index.md`), so this step also wires them up:
+
+- `package.json`: add `"test:e2e": "vitest run --config vitest.e2e.config.ts"`
+  and append `&& npm run test:e2e` to `check`, after `build`.
+- `tsconfig.test.json`: add `test` to `include` so e2e tests typecheck.
+- `vitest.config.ts` stays on `src/**` only, so `npm test` never needs a
+  build.
+
+The e2e tests import nothing from `src/` except `src/testing/`; they
+locate the binary at `dist/cli/main.js` and fail with a clear message
+if it is missing. Chains come from `test/fixtures/chains/`.
 
 ## Tests
 
 - Args: every form above, unknown flag exit code.
-- Integration: `rensa run` on a two-step fake chain prints the expected
+- E2E (`test/e2e/run.test.ts`): `rensa run` on a two-step fake chain prints the expected
   line sequence (assert on the keyword columns, not timestamps) and
   exits 0; a chain with a `pause` exits 1 with the hint unless
-  `--no-pause`; `--json` output parses line by line; `doctor` exits
-  as specified with the fake provider registered.
+  `--no-pause`; `--json` output parses line by line.
+- E2E (`test/e2e/doctor.test.ts`): `doctor` exits as specified with the
+  fake provider registered.
 
 ## Verification (human)
 

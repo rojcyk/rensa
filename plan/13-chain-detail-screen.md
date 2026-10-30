@@ -104,8 +104,8 @@ src/tui/screens/Detail.tsx
 src/tui/components/Timeline.tsx        shared with step 14: props { steps, mode: 'static' | 'live', selected? }
 src/tui/components/InputBox.tsx
 src/engine/engine.ts                   add preflight()
-test/unit/tui/detail.test.tsx
-test/integration/engine/preflight.test.ts
+src/tui/screens/Detail.test.tsx
+src/engine/engine.preflight.test.ts    integration, as in step 08
 ```
 
 ## Tests

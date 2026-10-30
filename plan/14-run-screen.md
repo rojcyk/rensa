@@ -150,8 +150,8 @@ src/tui/components/AgentRows.tsx
 src/tui/components/Transcript.tsx
 src/tui/components/StatusLine.tsx
 src/tui/format.ts                 elapsed, tokens, truncation helpers
-test/unit/tui/run.test.tsx
-test/unit/tui/format.test.ts
+src/tui/screens/Run.test.tsx
+src/tui/format.test.ts
 ```
 
 ## Tests

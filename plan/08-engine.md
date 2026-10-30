@@ -21,8 +21,8 @@ src/engine/run/runner.ts          one run's state machine
 src/engine/run/lock.ts
 src/engine/run/git.ts             dirty-tree check, HEAD sha, current ref
 src/engine/index.ts               export the public surface
-test/integration/engine/*.test.ts
-test/fixtures/chains/             chains used by integration tests
+src/engine/engine.test.ts         integration tests; split into engine.<topic>.test.ts if it grows
+test/fixtures/chains/             chains used by the integration tests
 ```
 
 ## Engine.open(cwd)

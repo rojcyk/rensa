@@ -58,7 +58,7 @@ chain (broken chains open a detail screen that shows only the error);
 src/tui/screens/Chains.tsx
 src/tui/components/ProviderLine.tsx
 src/tui/components/ChainRow.tsx
-test/unit/tui/chains.test.tsx      ink-testing-library snapshots
+src/tui/screens/Chains.test.tsx   ink-testing-library snapshots
 ```
 
 Add `ink-testing-library` as a dev dependency.

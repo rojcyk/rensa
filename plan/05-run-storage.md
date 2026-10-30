@@ -20,7 +20,7 @@ src/engine/run/runjson.ts
 src/engine/run/events.ts
 src/engine/run/transcript.ts
 src/engine/run/types.ts
-test/unit/run/*.test.ts
+src/engine/run/*.test.ts         one per module, next to it
 ```
 
 ## Run id (id.ts)
@@ -142,7 +142,7 @@ directory is created on first write.
 ## Verification (human)
 
 Inspect a generated run directory from the tests (keep one via a
-`KEEP_TMP=1` switch in the test helper) and read the files by eye.
+`KEEP_TMP=1` switch in `src/testing/tmpRepo.ts`) and read the files by eye.
 
 ## Out of scope
 

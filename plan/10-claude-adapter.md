@@ -21,7 +21,7 @@ src/engine/adapters/claude/argv.ts      request → argv, pure
 src/engine/adapters/claude/parse.ts     stream-json lines → AgentEvent, pure
 src/engine/adapters/claude/auth.ts      availability
 src/engine/adapters/claude/skills.ts    staging
-test/unit/adapters/claude/*.test.ts
+src/engine/adapters/claude/*.test.ts    argv, parse, auth, skills: one per module, next to it
 test/fixtures/claude/<name>/            captured, see "Fixture capture"
 ```
 

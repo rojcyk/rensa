@@ -39,7 +39,7 @@ placeholder; this step publishes over it.
 3. `package.json`: fill `repository`, `homepage`, `bugs`; confirm
    `files` and `bin`; version `0.1.0`.
 4. `npm pack`, inspect the tarball listing: `dist/`, `README.md`,
-   `LICENSE`, `package.json` only. No `test/`, no fixtures, no `plan/`.
+   `LICENSE`, `package.json` only. No `src/`, no `*.test.*`, no `test/`, no `plan/`.
 5. Clean-machine smoke test: a fresh user account or container with
    Node 22 and Claude Code installed and logged in. Install the
    tarball globally, create a repo with the README's minimal chain,

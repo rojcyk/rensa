@@ -27,8 +27,8 @@ src/tui/components/Frame.tsx         the rounded box used on the detail screen
 src/tui/hooks/useKeys.ts
 src/tui/hooks/useTick.ts             1 s tick for elapsed timers
 src/cli/main.ts                      wire `rensa` and `rensa <chain>` to the TUI
-test/unit/tui/ringBuffer.test.ts
-test/unit/tui/engineBridge.test.ts
+src/tui/ringBuffer.test.ts
+src/tui/engineBridge.test.ts
 ```
 
 ## theme.ts

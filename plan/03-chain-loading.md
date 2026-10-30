@@ -22,9 +22,9 @@ src/engine/config/resolve.ts      merge levels, expand agents, derive labels
 src/engine/config/validate.ts     loader rules
 src/engine/config/effort.ts       per-provider effort tables
 src/engine/config/index.ts        loadChain(name, discovered): ResolvedChain
-test/unit/config/load.test.ts
-test/unit/config/resolve.test.ts
-test/unit/config/validate.test.ts
+src/engine/config/load.test.ts
+src/engine/config/resolve.test.ts
+src/engine/config/validate.test.ts
 test/fixtures/config/              small yaml inputs for the tests
 ```
 

@@ -21,7 +21,9 @@ src/engine/adapters/available.ts
 src/engine/adapters/fake/index.ts
 src/engine/adapters/fake/fixture.ts
 test/fixtures/fake/hello/          hand-written fixture for tests
-test/unit/adapters/*.test.ts
+src/engine/adapters/available.test.ts
+src/engine/adapters/fake/index.test.ts
+src/engine/adapters/fake/fixture.test.ts
 ```
 
 ## Contract (types.ts)

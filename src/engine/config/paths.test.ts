@@ -1,9 +1,9 @@
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type Paths, resolvePaths, userConfigDir } from '../../../src/engine/config/paths.js'
-import { RensaError } from '../../../src/engine/errors.js'
-import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../helpers/tmpRepo.js'
+import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../testing/tmpRepo.js'
+import { RensaError } from '../errors.js'
+import { type Paths, resolvePaths, userConfigDir } from './paths.js'
 
 describe('choosing the user config dir', () => {
   let home: TmpDir

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RensaError } from '../../src/engine/errors.js'
+import { RensaError } from './errors.js'
 
 describe('RensaError', () => {
   it('carries code and message', () => {

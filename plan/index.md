@@ -58,15 +58,47 @@ src/
     screens/     Chains.tsx, Detail.tsx, Run.tsx
     components/  Header.tsx, Timeline.tsx, AgentRows.tsx, Transcript.tsx, InputBox.tsx
     hooks/
-test/
-  fixtures/<provider>/<name>/   raw.jsonl, transcript.jsonl, meta.json
-  unit/
-  integration/
+  testing/       shared test helpers (tmpRepo.ts); never imported by production code
 ```
 
 Import rule: nothing under `src/engine/` imports from `src/tui/` or
 `src/cli/`. `src/tui/` and `src/cli/` import the engine only through
 `src/engine/index.ts`.
+
+### Where tests live
+
+There are two kinds of test, and the kind decides the location.
+
+**Colocated tests** (`src/**/*.test.ts`, `src/**/*.test.tsx`) sit next to
+the file they test: `foo.ts` and `foo.test.ts` share a directory. They
+import the code under test directly and run in-process. This covers unit
+tests and in-process integration tests, such as `engine.test.ts`, which
+drives a real run through `Engine` with the fake provider and a temp
+repo. Rule of thumb: if the test calls a function or class, it is
+colocated with the file that defines it. `npm test` runs these.
+
+**End-to-end tests** (`test/e2e/**/*.test.ts`) exercise rensa the way a
+user does: they spawn the built `dist/cli/main.js` as a child process
+and assert only on stdout, stderr, exit code, and files on disk. They
+import nothing from `src/` except helpers in `src/testing/`. They span
+the whole program rather than one file, so they have no file to sit
+next to. They need `npm run build` first, and `npm run test:e2e` runs
+them (step 09 sets this up).
+
+Fixtures are data, not code, and live in one place at the top level
+(the Babel layout). Both kinds of test read from it:
+
+```
+test/
+  e2e/                        end-to-end tests (step 09 onward)
+  fixtures/
+    config/                   small yaml inputs for the loader (step 03)
+    chains/                   chains used by engine and e2e tests (steps 08, 09)
+    <provider>/<name>/        raw.jsonl, transcript.jsonl, meta.json, ... (steps 07, 10, 15, 16)
+```
+
+Nothing else goes in `test/`: a test that imports a module belongs next
+to that module.
 
 ### Core types (defined in step 03 and 07, used everywhere after)
 
@@ -149,6 +181,14 @@ interface RunHandle {
   the engine never formats for a terminal.
 - Durations in events are never stored; consumers compute from `t`.
 - All file paths in resolved structures are absolute.
-- Tests: vitest. Each step lists the tests it must add. Integration tests
-  use the fake provider and a temporary git repository created in a temp
-  directory.
+- Tests: vitest. Colocated or end-to-end as described under "Where
+  tests live"; each step lists the test files it must add. A colocated
+  test is named after the module it exercises and may be split as
+  `<module>.<topic>.test.ts` (`engine.preflight.test.ts`). An e2e test is
+  named after the command it runs (`run.test.ts`, `doctor.test.ts`).
+  Integration and e2e tests use the fake provider and a temporary git
+  repository from `src/testing/tmpRepo.ts`.
+- `tsconfig.json` excludes `*.test.*` and `src/testing/`
+  so production typechecking never sees test code; `tsconfig.test.json`
+  includes everything. tsdown bundles only from entry points, so none of
+  it reaches `dist/`.

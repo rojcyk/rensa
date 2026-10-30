@@ -18,7 +18,7 @@ src/engine/template/namespace.ts
 src/engine/template/vars.ts
 src/engine/template/render.ts
 src/engine/template/output.ts
-test/unit/template/*.test.ts
+src/engine/template/*.test.ts    one per module, next to it
 ```
 
 ## Namespace (namespace.ts)
