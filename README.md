@@ -1,1 +1,1 @@
-# gori
+Placeholder. Rensa, a terminal tool for chains of agent steps across coding CLIs, is in development.

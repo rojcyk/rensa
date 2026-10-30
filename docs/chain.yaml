@@ -1,0 +1,197 @@
+# rensa chain reference
+#
+# One file per chain in <repo>/.rensa/. The file stem is the chain name.
+# Every key the v1 format accepts is shown; keys marked (optional) can be
+# omitted. Steps run top to bottom, once each.
+#
+# Paths resolve relative to the file that declares them.
+
+# Must match the file stem if set. (optional)
+name: tdd-review
+
+# One line of description. (optional)
+description: Tests first, implementation, three reviewers, routed fixes, re-test.
+
+# What the user supplies at launch.
+#   none  (default) nothing
+#   text  free text, available as {{input}}
+#   file  a file; content as {{input}}, path as {{input_path}}
+# A prompt referencing {{input}} under input: none is a load error.
+input: text
+
+# Git ref the run diffs against. Resolution, nearest wins: launch flag or
+# screen, this key, project.yaml, then the ref checked out at launch.
+# (optional)
+# base: main
+
+# -----------------------------------------------------------------------------
+# agents
+# -----------------------------------------------------------------------------
+#
+# Registry entries define configuration only. How a step lists an entry
+# decides its memory:
+#
+#   agents: [impl]              name   -> one session per run, resumed on
+#                                         every later use
+#   agents: [{ from: codex }]   from   -> fresh copy, new session each time;
+#                                         inline fields override copied ones
+#   agents: [{ provider: … }]   inline -> fresh, same fields as an entry
+#
+# Entries merge by name with project.yaml registries, nearest wins: this
+# file, <repo>/.rensa/project.yaml, ~/.config/rensa/project.yaml. A
+# redefined name replaces the whole entry.
+
+agents:
+  impl:
+    # claude | codex | grok
+    provider: claude
+
+    # Provider-specific model value. Omit for the CLI default. (optional)
+    model: opus
+
+    # low | medium | high | max. Mapped per provider; a value the provider
+    # cannot honor is a load error. Omit for the CLI default. (optional)
+    effort: high
+
+    # read | write. Ceiling for this agent; a step may narrow it, never
+    # raise it.
+    tools: write
+
+    # Persona file, delivered once per session. (optional)
+    prompt: agents/implementer.md
+
+    # Skill directories, each containing SKILL.md. `~` expands. (optional)
+    # skills: [~/.config/rensa/skills/code-review, ./skills/house-rules]
+
+  tester:
+    provider: claude
+    model: opus
+    effort: high
+    tools: write
+    prompt: agents/test-writer.md
+
+  logic:
+    provider: claude
+    model: opus
+    effort: high
+    tools: read
+    prompt: agents/reviewer-logic.md
+
+  # codex and grok come from project.yaml and are used below via from:.
+
+# -----------------------------------------------------------------------------
+# steps
+# -----------------------------------------------------------------------------
+#
+# A step is an agent step (prompt + agents) or a shell step (run), never
+# both. Common keys: id, on_fail, timeout, pause.
+#
+# Loader rules:
+#   - step ids are unique
+#   - an agent step has a prompt and exactly one agent (the list form is
+#     kept for a later revision with parallel agents)
+#   - a named agent on a provider without session resume is an error
+#   - a shell step counts as a write step
+
+steps:
+
+  - id: baseline
+    # Shell command, run with /bin/sh -c in the repo root.
+    run: npm test
+    # stop (default) | continue
+    on_fail: continue
+    # Wall-clock cap, default 1h. Applies to agent steps too. (optional)
+    # timeout: 20m
+
+  - id: write-tests
+    # Message sent to the agent. Required on agent steps.
+    prompt: steps/write-tests.md
+    # Always a list, exactly one entry.
+    agents: [tester]
+
+  - id: implement
+    prompt: steps/implement.md
+    agents: [impl]
+
+  - id: test
+    run: npm test
+    on_fail: continue
+
+  - id: review-codex
+    prompt: steps/review.md
+    # from: copies a registry entry as a fresh worker; inline fields
+    # override copied ones.
+    agents: [{ from: codex }]
+
+    # Narrow the agent's tools for this step: read | write. Only narrowing.
+    # (optional)
+    # tools: read
+
+    # Variables for the prompt, used where it writes {{name}}; single
+    # braces are left untouched. Value forms:
+    #   literal        plain string
+    #   $(command)     shell command in the repo root, stdout captured;
+    #                  other variables may appear inside
+    #   dotted.path    reference into the namespace below
+    # Referencing an undeclared variable is a load error. (optional)
+    vars:
+      diff: $(git diff {{base}})
+      baseline: steps.baseline.output
+      test_output: steps.test.output
+
+  - id: review-grok
+    prompt: steps/review.md
+    agents: [{ from: grok }]
+    vars:
+      diff: $(git diff {{base}})
+      baseline: steps.baseline.output
+      test_output: steps.test.output
+
+  - id: review-logic
+    prompt: steps/review.md
+    agents: [{ from: logic }]
+    vars:
+      diff: $(git diff {{base}})
+      baseline: steps.baseline.output
+      test_output: steps.test.output
+
+  - id: fix-tests
+    prompt: steps/fix-tests.md
+    agents: [tester]
+    vars:
+      review_codex: steps.review-codex.output
+      review_grok: steps.review-grok.output
+      review_logic: steps.review-logic.output
+      test_output: steps.test.output
+    # before | after. Halt the run and wait for the user. (optional)
+    pause: before
+
+  - id: fix-impl
+    prompt: steps/fix-impl.md
+    agents: [impl]
+    vars:
+      review_codex: steps.review-codex.output
+      review_grok: steps.review-grok.output
+      review_logic: steps.review-logic.output
+      test_output: steps.test.output
+
+  - id: retest
+    run: npm test
+
+# -----------------------------------------------------------------------------
+# namespace
+# -----------------------------------------------------------------------------
+#
+#   input                 chain input
+#   input_path            file path, for input: file
+#   base                  resolved base ref
+#   run_id                run id
+#   steps.<id>.output     shell step: last 16 KB of stdout+stderr
+#                         agent step: map by agent label; parsed trailing
+#                         JSON object if the reply ended in one, else text.
+#                         In a prompt it renders as one "### <label>"
+#                         section per entry, text verbatim, objects as
+#                         pretty-printed JSON
+#   steps.<id>.passed     shell step: exit code was zero
+#   steps.<id>.exit_code  shell step
+#   steps.<id>.text       agent step: concatenated final replies

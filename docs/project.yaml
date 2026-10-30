@@ -1,0 +1,35 @@
+# rensa project reference
+#
+# Shared configuration for every chain in a scope. Two optional locations:
+#
+#   ~/.config/rensa/project.yaml    your machine
+#   <repo>/.rensa/project.yaml      this repository
+#
+# Resolution, nearest wins: chain file, repo project.yaml, user
+# project.yaml. Paths resolve relative to this file.
+
+# Default git ref for chains in this scope. A chain's base: wins over it.
+# (optional)
+# base: main
+
+# ANTHROPIC_API_KEY, OPENAI_API_KEY, and XAI_API_KEY are removed from every
+# agent's environment unless this is true. (optional, default false)
+# allow_api_keys: false
+
+# Registry entries shared by every chain in this scope. Same fields as a
+# chain's agents block: provider, model, effort, tools, prompt, skills.
+# Entries merge by name across levels; a name redefined nearer the chain
+# replaces the whole entry. (optional)
+agents:
+  codex:
+    provider: codex
+    effort: medium
+    tools: read
+    prompt: agents/reviewer-correctness.md
+    skills: [~/.config/rensa/skills/code-review]
+
+  grok:
+    provider: grok
+    tools: read
+    prompt: agents/reviewer-security.md
+    skills: [~/.config/rensa/skills/code-review]
