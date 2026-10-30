@@ -1,0 +1,17 @@
+{
+  "name": "@rojcyk/rensa",
+  "version": "0.0.1",
+  "description": "Placeholder. Rensa, a terminal tool for chains of agent steps across coding CLIs, is in development.",
+  "license": "MIT",
+  "keywords": [],
+  "author": "rojcyk",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rojcyk/rensa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rojcyk/rensa/issues"
+  },
+  "homepage": "https://github.com/rojcyk/rensa#readme"
+}
