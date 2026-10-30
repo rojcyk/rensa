@@ -10,7 +10,7 @@ separate) is enforced by a lint rule from step 01 onward.
 
 ## Steps
 
-- [ ] [01 Scaffold](01-scaffold.md) — package, tooling, directory layout, import boundary lint, `rensa --version`.
+- [x] [01 Scaffold](01-scaffold.md) — package, tooling, directory layout, import boundary lint, `rensa --version`.
 - [ ] [02 Config discovery](02-config-discovery.md) — locate `.rensa/`, user config dir, chain files, project files; write `.gitignore`.
 - [ ] [03 Chain loading](03-chain-loading.md) — parse YAML, resolve agents across levels, expand `from:`, derive labels, validate, structured errors.
 - [ ] [04 Templates and variables](04-templates-and-vars.md) — `{{name}}` rendering, namespace, `vars` evaluation, output-map rendering, user notes.

@@ -1,0 +1,60 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": { "includes": ["**", "!**/*.md", "!plan", "!docs"] },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "single", "semicolons": "asNeeded" }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": { "preset": "recommended" }
+  },
+  "overrides": [
+    {
+      "includes": ["src/engine/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/tui", "**/tui/**", "**/cli", "**/cli/**"],
+                    "message": "The engine must not import from src/tui or src/cli."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/tui/**", "src/cli/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/engine/**", "!**/engine/index.js", "!**/engine/index"],
+                    "message": "Import the engine only through src/engine/index.ts."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

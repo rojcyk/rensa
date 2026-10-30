@@ -51,7 +51,7 @@ docs/                      already exists; leave as is
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "repository": "github:rojcyk/rensa",
@@ -72,8 +72,9 @@ Pin exact versions in `package.json` (no `^`). Commit `package-lock.json`.
 Strict. `"module": "NodeNext"`, `"moduleResolution": "NodeNext"`,
 `"target": "ES2022"`, `"jsx": "react-jsx"`, `"rootDir": "src"`,
 `"outDir": "dist"`, `"noUncheckedIndexedAccess": true`,
-`"exactOptionalPropertyTypes": true`. Include `src` only; tests are
-type-checked by vitest.
+`"exactOptionalPropertyTypes": true`. Include `src` only. `tsconfig.test.json` extends it with `rootDir: "."`,
+`noEmit`, and includes `src`, `test`, and `*.config.ts`; the `typecheck`
+script runs both, since vitest strips types without checking them.
 
 ## tsdown.config.ts
 

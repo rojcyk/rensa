@@ -207,3 +207,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+### rensa ###
+.rensa/runs/
