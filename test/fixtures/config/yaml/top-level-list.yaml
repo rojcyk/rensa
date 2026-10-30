@@ -1,0 +1,2 @@
+- id: lint
+  run: npm run lint

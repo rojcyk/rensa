@@ -1,0 +1,19 @@
+name: review
+description: Implement, then review with a nearer reviewer and a user-level auditor.
+agents:
+  reviewer:
+    provider: claude
+    model: opus
+    tools: read
+    prompt: agents/reviewer.md
+    skills: [skills/house-rules]
+steps:
+  - id: implement
+    prompt: steps/implement.md
+    agents: [writer]
+  - id: review
+    prompt: steps/review.md
+    agents: [reviewer]
+  - id: audit
+    prompt: steps/review.md
+    agents: [auditor]

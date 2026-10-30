@@ -1,0 +1,9 @@
+base: main
+agents:
+  reviewer:
+    provider: grok
+    tools: read
+  writer:
+    provider: claude
+    tools: write
+    prompt: agents/implementer.md

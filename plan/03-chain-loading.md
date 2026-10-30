@@ -101,7 +101,8 @@ Inputs: raw chain, optional raw project (repo), optional raw project
    - `vars`: keep as `Record<string, VarSpec>` where
      `VarSpec = { kind: 'literal' | 'shell' | 'ref', value: string }`,
      classified by syntax: `$(...)` → shell with the inner command;
-     matches `/^[a-z_][a-z0-9_]*(\.[a-z0-9_-]+)+$/i` → ref; else literal.
+     matches `/^steps(\.[a-z0-9_-]+)+$/` → ref; else literal. (Only
+     `steps` has nested fields, so `package.json` or `v1.2.3` stay literal.)
      Evaluation is step 04's job.
 6. `name`: file stem; if `name` is present in the file and differs,
    `CONFIG_INVALID`.

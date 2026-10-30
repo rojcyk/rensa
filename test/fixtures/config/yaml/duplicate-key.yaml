@@ -1,0 +1,6 @@
+name: review
+description: Lint, then one read-only review.
+name: review-again
+steps:
+  - id: lint
+    run: npm run lint

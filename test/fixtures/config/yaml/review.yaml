@@ -1,0 +1,8 @@
+name: review
+description: Lint, then one read-only review.
+steps:
+  - id: lint
+    run: npm run lint
+  - id: review
+    prompt: steps/review.md
+    agents: [reviewer]

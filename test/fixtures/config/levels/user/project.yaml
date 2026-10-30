@@ -1,0 +1,14 @@
+base: develop
+allow_api_keys: true
+agents:
+  reviewer:
+    provider: codex
+    effort: max
+    tools: read
+    prompt: agents/reviewer.md
+    skills: [skills/code-review]
+  auditor:
+    provider: codex
+    tools: read
+    prompt: agents/reviewer.md
+    skills: [skills/code-review]

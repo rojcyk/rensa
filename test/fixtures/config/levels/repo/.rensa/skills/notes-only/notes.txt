@@ -1,0 +1,1 @@
+A directory that is not a skill: it has no SKILL.md.

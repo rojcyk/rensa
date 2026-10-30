@@ -19,6 +19,8 @@ export class RensaError extends Error {
     public readonly path?: string,
     /** One-line remedy, e.g. "run: claude auth login". */
     public readonly hint?: string,
+    /** Further errors found alongside this one, as messages. */
+    public readonly details?: string[],
   ) {
     super(message)
     this.name = 'RensaError'

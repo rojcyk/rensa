@@ -132,7 +132,9 @@ steps:
     #   literal        plain string
     #   $(command)     shell command in the repo root, stdout captured;
     #                  other variables may appear inside
-    #   dotted.path    reference into the namespace below
+    #   steps.<id>.<field>
+    #                  reference into the namespace below; any other
+    #                  dotted value (package.json, v1.2.3) is a literal
     # Referencing an undeclared variable is a load error. (optional)
     vars:
       diff: $(git diff {{base}})

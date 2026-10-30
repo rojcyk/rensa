@@ -1,3 +1,18 @@
 export { type ChainFile, type Discovered, discover, ensureProjectDir } from './config/discover.js'
+export { EFFORT } from './config/effort.js'
+export { loadAllChains, loadChain } from './config/index.js'
 export { type Paths, resolvePaths, userConfigDir } from './config/paths.js'
+export type {
+  AgentConfig,
+  AgentStep,
+  Effort,
+  Provider,
+  ResolvedAgent,
+  ResolvedChain,
+  ShellStep,
+  Step,
+  Tools,
+  VarSpec,
+} from './config/types.js'
+export { validateWithAdapters } from './config/validate.js'
 export { RensaError, type RensaErrorCode } from './errors.js'
