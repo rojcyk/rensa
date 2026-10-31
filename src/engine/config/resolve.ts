@@ -2,6 +2,7 @@ import { stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { EFFORT } from './effort.js'
+import { child, invalid, type Loc } from './loc.js'
 import {
   type AgentConfig,
   type AgentStep,
@@ -24,7 +25,7 @@ import {
   type Tools,
   type VarSpec,
 } from './types.js'
-import { child, invalid, type Loc, type UnvalidatedChain } from './validate.js'
+import type { UnvalidatedChain } from './validate.js'
 
 const CHAIN_NAME = /^[a-z0-9_-]+$/i
 
@@ -59,7 +60,7 @@ export async function resolveChain(input: ResolveInput): Promise<UnvalidatedChai
   }
   const registry = buildRegistry(input)
   const steps: Step[] = []
-  for (const [i, rawStep] of (raw.steps ?? []).entries()) {
+  for (const [i, rawStep] of raw.steps.entries()) {
     steps.push(await resolveStep(rawStep, child(child(root, 'steps'), i), registry))
   }
   const base = raw.base ?? input.project?.raw.base ?? input.user?.raw.base
@@ -261,7 +262,6 @@ const STEP_ID = /^[a-z0-9_-]+$/i
 const VAR_NAME = /^[a-z_][\w-]*$/i
 
 async function resolveStep(raw: RawStep, loc: Loc, registry: Registry): Promise<Step> {
-  if (raw.id === undefined) throw invalid(loc, `step at ${loc.at} needs an \`id\``)
   if (!STEP_ID.test(raw.id)) {
     throw invalid(
       child(loc, 'id'),

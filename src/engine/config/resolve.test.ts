@@ -5,6 +5,8 @@ import { type TmpDir, tmpDir } from '../../testing/tmpRepo.js'
 import { RensaError } from '../errors.js'
 import { classifyVar, deriveLabels, parseTimeout, resolveChain } from './resolve.js'
 import type {
+  Effort,
+  Provider,
   RawAgent,
   RawAgentRef,
   RawChain,
@@ -181,7 +183,7 @@ describe('agent registry across user, repo and chain levels', () => {
 
   it('does not check a user entry that a nearer level replaces, even when it is invalid', async () => {
     const brokenUser: RawProject = {
-      agents: { reviewer: { provider: 'gemini', tools: 'read', prompt: 'agents/missing.md' } },
+      agents: { reviewer: { provider: 'codex', tools: 'read', prompt: 'agents/missing.md' } },
     }
     const chain = chainOf([agentStep('reviewer')])
 
@@ -206,7 +208,7 @@ describe('agent registry across user, repo and chain levels', () => {
   it('ignores a broken registry entry that no step uses', async () => {
     const brokenUser: RawProject = {
       agents: {
-        stale: { provider: 'gemini', prompt: 'agents/missing.md', skills: ['skills/gone'] },
+        stale: { provider: 'codex', prompt: 'agents/missing.md', skills: ['skills/gone'] },
       },
     }
 
@@ -356,14 +358,6 @@ describe('registry entry fields', () => {
     expect(err.path).toBe('agents.impl')
   })
 
-  it('reports the provider path when the provider is not one rensa knows', async () => {
-    const err = await resolveError({
-      chain: registryChain({ impl: { provider: 'gemini', tools: 'write' } }),
-    })
-
-    expect(err.path).toBe('agents.impl.provider')
-  })
-
   it('rejects provider fake as unknown when RENSA_DEV is not 1', async () => {
     const err = await resolveError({
       chain: registryChain({ impl: { provider: 'fake', tools: 'write' } }),
@@ -386,7 +380,7 @@ describe('registry entry fields', () => {
 
   // Translation to the provider's value (codex max -> xhigh) is the
   // adapter's job; the resolved config keeps rensa's level.
-  it.each([
+  it.each<[Provider, Effort]>([
     ['claude', 'max'],
     ['codex', 'max'],
     ['codex', 'low'],
@@ -410,26 +404,10 @@ describe('registry entry fields', () => {
     expect(err.message).toBe(`${CHAIN_FILE}: grok does not support effort: max (agent \`grok\`)`)
   })
 
-  it('reports the effort path when effort is not low, medium, high or max', async () => {
-    const chain = registryChain({ impl: { provider: 'claude', effort: 'extreme', tools: 'read' } })
-
-    const err = await resolveError({ chain })
-
-    expect(err.path).toBe('agents.impl.effort')
-  })
-
   it('reports the entry path when tools is missing', async () => {
     const err = await resolveError({ chain: registryChain({ impl: { provider: 'claude' } }) })
 
     expect(err.path).toBe('agents.impl')
-  })
-
-  it('reports the tools path when tools is neither read nor write', async () => {
-    const chain = registryChain({ impl: { provider: 'claude', tools: 'admin' } })
-
-    const err = await resolveError({ chain })
-
-    expect(err.path).toBe('agents.impl.tools')
   })
 
   it.each([
@@ -545,14 +523,6 @@ describe('step shapes', () => {
     expect(err.path).toBe('steps[1]')
   })
 
-  it('reports steps[i] when a step has no id', async () => {
-    const chain = chainOf([shellStep(), { run: 'npm test' }])
-
-    const err = await resolveError({ chain })
-
-    expect(err.path).toBe('steps[1]')
-  })
-
   it.each(['review codex', 'review.codex', 'résumé', ''])(
     'reports steps[i].id when the id is %j',
     async (id) => {
@@ -586,14 +556,12 @@ describe('step shapes', () => {
     )
   })
 
-  it.each<[string, Partial<RawStep>]>([
-    ['on_fail', { on_fail: 'retry' }],
-    ['pause', { pause: 'during' }],
-    ['timeout', { timeout: '20 minutes' }],
-  ])('reports steps[i].%s when its value is not allowed', async (key, overrides) => {
-    const err = await resolveError({ chain: chainOf([shellStep(overrides)]) })
+  // The schema only checks the `<digits><unit>` shape; zero is caught here.
+  it('reports steps[i].timeout when the timeout is zero', async () => {
+    const err = await resolveError({ chain: chainOf([shellStep({ timeout: '0s' })]) })
 
-    expect(err.path).toBe(`steps[0].${key}`)
+    expect(err.path).toBe('steps[0].timeout')
+    expect(err.message).toContain('invalid timeout `0s`')
   })
 
   it.each<[string, Partial<RawStep>]>([
@@ -634,14 +602,6 @@ describe('step tools narrowing', () => {
     const err = await resolveError({ chain })
 
     expect(err.path).toBe('steps[0].agents[0]')
-  })
-
-  it('reports steps[i].tools when the step tools value is neither read nor write', async () => {
-    const chain = chainOf([agentStep('impl', { tools: 'none' })], { agents })
-
-    const err = await resolveError({ chain })
-
-    expect(err.path).toBe('steps[0].tools')
   })
 })
 
@@ -750,12 +710,6 @@ describe('chain-level fields', () => {
     const resolved = await resolve({ chain: chainOf([shellStep()]) })
 
     expect(resolved.input).toBe('none')
-  })
-
-  it('reports input when the value is not none, text or file', async () => {
-    const err = await resolveError({ chain: chainOf([shellStep()], { input: 'stdin' }) })
-
-    expect(err.path).toBe('input')
   })
 
   it.each<[string, Partial<Levels>, string | undefined]>([

@@ -2,8 +2,8 @@ import { RensaError } from '../errors.js'
 import type { Discovered } from './discover.js'
 import { loadYaml } from './load.js'
 import { resolveChain } from './resolve.js'
-import type { RawProject, ResolvedChain } from './types.js'
-import { checkRawChain, checkRawProject, validateChain } from './validate.js'
+import { RawChainSchema, type RawProject, RawProjectSchema, type ResolvedChain } from './types.js'
+import { validateChain } from './validate.js'
 
 export async function loadChain(name: string, d: Discovered): Promise<ResolvedChain> {
   const chainFile = d.chains.find((c) => c.name === name)
@@ -11,9 +11,7 @@ export async function loadChain(name: string, d: Discovered): Promise<ResolvedCh
     throw new RensaError('CHAIN_NOT_FOUND', `no chain named \`${name}\` in ${d.paths.projectDir}`)
   }
   const [chain, project, user] = await Promise.all([
-    loadYaml<Record<string, unknown>>(chainFile.path).then((doc) =>
-      checkRawChain(doc, chainFile.path),
-    ),
+    loadYaml(chainFile.path, RawChainSchema),
     loadProject(d.projectConfig),
     loadProject(d.userConfig),
   ])
@@ -49,6 +47,5 @@ async function loadProject(
   file: string | undefined,
 ): Promise<{ raw: RawProject; file: string } | undefined> {
   if (file === undefined) return undefined
-  const doc = await loadYaml<Record<string, unknown>>(file)
-  return { raw: checkRawProject(doc, file), file }
+  return { raw: await loadYaml(file, RawProjectSchema), file }
 }

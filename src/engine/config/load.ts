@@ -1,13 +1,16 @@
 import { readFile } from 'node:fs/promises'
 import { parse, YAMLParseError } from 'yaml'
+import type { z } from 'zod'
 import { RensaError } from '../errors.js'
+import { zodToRensaError } from './issues.js'
+import { describe, isMapping } from './types.js'
 
 /**
- * Parses one YAML file whose top level must be a mapping. The result is
- * unchecked beyond that: `T` is the raw shape the caller expects, and
- * `validate.ts` checks it against that shape before anything trusts it.
+ * Parses one YAML file and checks it against `schema`. The result has the
+ * schema's shape and nothing more: `resolve.ts` and `validate.ts` apply
+ * the rules that need context beyond the document itself.
  */
-export async function loadYaml<T>(file: string): Promise<T> {
+export async function loadYaml<T>(file: string, schema: z.ZodType<T>): Promise<T> {
   let text: string
   try {
     text = await readFile(file, 'utf8')
@@ -32,16 +35,15 @@ export async function loadYaml<T>(file: string): Promise<T> {
       file,
     )
   }
-  // Boundary cast: the shape is checked by validate.ts before use.
-  return doc as T
+  return parseRaw(schema, doc, file)
 }
 
-export function isMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-export function describe(value: unknown): string {
-  if (value === null || value === undefined) return 'nothing'
-  if (Array.isArray(value)) return 'a list'
-  return `a ${typeof value === 'object' ? 'mapping' : typeof value}`
+/**
+ * Checks a parsed document against its schema. A failure is a
+ * `CONFIG_INVALID` error naming `file` and the dotted path of the problem.
+ */
+export function parseRaw<T>(schema: z.ZodType<T>, doc: unknown, file: string): T {
+  const result = schema.safeParse(doc)
+  if (!result.success) throw zodToRensaError(result.error, file)
+  return result.data
 }

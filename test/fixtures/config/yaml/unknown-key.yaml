@@ -1,0 +1,4 @@
+steps:
+  - id: deploy
+    run: npm run deploy
+    when: steps.lint.passed

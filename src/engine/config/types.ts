@@ -1,43 +1,10 @@
-// Raw types mirror the YAML exactly; nothing is checked yet. Resolved
-// types are what the rest of the engine consumes.
+import { z } from 'zod'
 
-export interface RawAgent {
-  provider?: string
-  model?: string
-  effort?: string
-  tools?: string
-  prompt?: string
-  skills?: string[]
-}
-
-export type RawAgentRef = string | ({ from?: string } & RawAgent)
-
-export interface RawStep {
-  id?: string
-  prompt?: string
-  agents?: RawAgentRef[]
-  vars?: Record<string, string>
-  run?: string
-  on_fail?: string
-  timeout?: string
-  pause?: string
-  tools?: string
-}
-
-export interface RawChain {
-  name?: string
-  description?: string
-  input?: string
-  base?: string
-  agents?: Record<string, RawAgent>
-  steps?: RawStep[]
-}
-
-export interface RawProject {
-  base?: string
-  allow_api_keys?: boolean
-  agents?: Record<string, RawAgent>
-}
+// Raw schemas mirror the YAML exactly: every key the format accepts, its
+// type, its enum, and `.strict()` to reject reserved keys. Anything that
+// needs more than the document itself, such as file existence, registry
+// lookups or the effort table, is checked in resolve.ts and validate.ts.
+// Resolved types are what the rest of the engine consumes.
 
 export const PROVIDERS = ['claude', 'codex', 'grok', 'fake'] as const
 export type Provider = (typeof PROVIDERS)[number]
@@ -56,6 +23,115 @@ export type OnFail = (typeof ON_FAIL)[number]
 
 export const PAUSES = ['before', 'after'] as const
 export type Pause = (typeof PAUSES)[number]
+
+export function isMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function describe(value: unknown): string {
+  if (value === null || value === undefined) return 'nothing'
+  if (Array.isArray(value)) return 'a list'
+  return `a ${typeof value === 'object' ? 'mapping' : typeof value}`
+}
+
+const Timeout = z.string().regex(/^\d+[smh]$/, 'expected a duration like 20m or 1h')
+
+/**
+ * `z.record` writes each parsed key onto a plain object, which silently
+ * drops a key named `__proto__`. YAML delivers that key like any other, so
+ * vars are checked in place and returned as parsed.
+ */
+const Vars = z
+  .custom<Record<string, string>>(isMapping, {
+    error: 'Invalid input: expected record',
+    abort: true,
+  })
+  .superRefine((vars, ctx) => {
+    const entries: Array<[string, unknown]> = Object.entries(vars)
+    for (const [name, value] of entries) {
+      if (typeof value !== 'string') {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: `expected a string, got ${describe(value)}; quote the value`,
+        })
+      }
+    }
+  })
+
+export const RawAgentSchema = z
+  .object({
+    provider: z.enum(PROVIDERS).optional(),
+    model: z.string().optional(),
+    effort: z.enum(EFFORTS).optional(),
+    tools: z.enum(TOOLS).optional(),
+    prompt: z.string().optional(),
+    skills: z.array(z.string()).optional(),
+  })
+  .strict()
+
+export const RawAgentRefSchema = z.union([
+  z.string(),
+  RawAgentSchema.extend({ from: z.string().optional() }).strict(),
+])
+
+// A registry name becomes the agent's label, which is a directory name
+// under the run and a key in `steps.<id>.output.<label>`.
+const AGENT_NAME = /^[a-z0-9_-]+$/i
+
+const RegistrySchema = z.record(z.string(), RawAgentSchema).superRefine((agents, ctx) => {
+  for (const name of Object.keys(agents)) {
+    if (!AGENT_NAME.test(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [name],
+        message: `agent name \`${name}\` may contain only letters, digits, \`_\` and \`-\``,
+      })
+    }
+  }
+})
+
+export const RawStepSchema = z
+  .object({
+    id: z.string().min(1),
+    prompt: z.string().optional(),
+    agents: z
+      .array(RawAgentRefSchema)
+      .length(1, 'exactly one agent per step in this version')
+      .optional(),
+    vars: Vars.optional(),
+    run: z.string().optional(),
+    on_fail: z.enum(ON_FAIL).optional(),
+    timeout: Timeout.optional(),
+    pause: z.enum(PAUSES).optional(),
+    tools: z.enum(TOOLS).optional(),
+  })
+  .strict()
+
+export const RawChainSchema = z
+  .object({
+    name: z.string().optional(),
+    description: z.string().optional(),
+    input: z.enum(INPUTS).optional(),
+    base: z.string().optional(),
+    agents: RegistrySchema.optional(),
+    steps: z.array(RawStepSchema).min(1),
+  })
+  .strict()
+
+export const RawProjectSchema = z
+  .object({
+    base: z.string().optional(),
+    allow_api_keys: z.boolean().optional(),
+    agents: RegistrySchema.optional(),
+  })
+  .strict()
+
+export type RawAgent = z.infer<typeof RawAgentSchema>
+export type RawAgentRef = z.infer<typeof RawAgentRefSchema>
+export type RawStep = z.infer<typeof RawStepSchema>
+export type RawChain = z.infer<typeof RawChainSchema>
+export type RawProject = z.infer<typeof RawProjectSchema>
 
 export interface AgentConfig {
   provider: Provider
