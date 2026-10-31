@@ -15,7 +15,7 @@ separate) is enforced by a lint rule from step 01 onward.
 - [ ] [03 Chain loading](03-chain-loading.md) — parse YAML, resolve agents across levels, expand `from:`, derive labels, validate, structured errors.
 - [ ] [04 Templates and variables](04-templates-and-vars.md) — `{{name}}` rendering, namespace, `vars` evaluation, output-map rendering, user notes.
 - [ ] [05 Run storage](05-run-storage.md) — run id, run directory, `run.json`, `events.jsonl` single writer and reader, transcript writer.
-- [ ] [06 Processes and shell steps](06-processes-and-shell-steps.md) — spawn in a process group, kill, timeout, line readers, env stripping, shell step executor.
+- [ ] [06 Processes and shell steps](06-processes-and-shell-steps.md) — spawn in a process group, kill, timeout, line readers, env stripping, shell step executor, ordered synchronous shutdown hook.
 - [ ] [07 Adapter interface and fake provider](07-adapter-interface-and-fake.md) — adapter contract, normalized agent events, fixture format, fake adapter that replays fixtures.
 - [ ] [08 Engine](08-engine.md) — orchestrator: locks, availability check, sequential steps, pauses, user commands, event emission.
 - [ ] [09 Headless CLI](09-headless-cli.md) — `rensa run`, `rensa doctor`, line output, exit codes.
@@ -41,8 +41,8 @@ src/
   engine/
     config/      paths.ts, discover.ts, load.ts, resolve.ts, validate.ts, types.ts
     template/    render.ts, namespace.ts, vars.ts
-    run/         id.ts, dir.ts, runjson.ts, events.ts, transcript.ts
-    process/     spawn.ts, lines.ts, env.ts, shell.ts
+    run/         id.ts, dir.ts, runjson.ts, events.ts, transcript.ts, view.ts
+    process/     spawn.ts, lines.ts, env.ts, shell.ts, shutdown.ts
     adapters/    types.ts, registry.ts, available.ts, fake/, claude/, grok/, codex/
     engine.ts    Engine class
     errors.ts    RensaError and codes
@@ -54,9 +54,11 @@ src/
   tui/
     app.tsx      root, screen router
     theme.ts
+    store.ts     external store; setState skips notification on the same reference; useStore
+    batch.ts     coalesces engine events into one setState per 50 ms
     engineBridge.ts
     screens/     Chains.tsx, Detail.tsx, Run.tsx
-    components/  Header.tsx, Timeline.tsx, AgentRows.tsx, Transcript.tsx, InputBox.tsx
+    components/  Header.tsx, Spinner.tsx, Elapsed.tsx, Timeline.tsx, AgentRows.tsx, Transcript.tsx, InputBox.tsx
     hooks/
   testing/       shared test helpers (tmpRepo.ts); never imported by production code
 ```
@@ -148,9 +150,10 @@ interface ResolvedChain {
 
 ```ts
 class Engine extends EventEmitter {
-  static async open(cwd: string): Promise<Engine>     // discovers config, checks providers
-  providers(): ProviderStatus[]
-  recheckProviders(): Promise<ProviderStatus[]>
+  static async open(cwd: string): Promise<Engine>     // starts the provider check first, unawaited; discovers config, loads chains
+  providers(): ProviderStatus[] | undefined           // last completed check; undefined until the first completes
+  readonly providersChecked: Promise<ProviderStatus[]> // the check in flight; never rejects
+  recheckProviders(): Promise<ProviderStatus[]>       // new check; replaces providersChecked
   chains(): ChainSummary[]                            // loaded or errored
   chain(name: string): ResolvedChain                  // throws RensaError
   preflight(name: string): Promise<LaunchCheck>       // same checks start() performs, without side effects
@@ -162,7 +165,8 @@ interface RunHandle {
   done: Promise<RunStatus>
 }
 // Events: 'event' (RunEvent, one per events.jsonl line),
-//         'transcript' (step, label, TranscriptRecord, partial?: boolean)
+//         'transcript' (step, label, TranscriptRecord, partial?: boolean),
+//         'providers' (ProviderStatus[], after every completed check)
 ```
 
 ### Event and transcript formats (step 05)
@@ -180,6 +184,10 @@ interface RunHandle {
   `message`, and optional `path` and `hint`. The UI and CLI format them;
   the engine never formats for a terminal.
 - Durations in events are never stored; consumers compute from `t`.
+- Interpreting the event log (which step is running, finished, paused;
+  agent rows; run status) is engine logic in `src/engine/run/view.ts`
+  (`reduceSteps`, `applyEvent`, `reduceRun`, step 08). The CLI and the
+  TUI call it; neither switches on event types itself.
 - All file paths in resolved structures are absolute.
 - Tests: vitest. Colocated or end-to-end as described under "Where
   tests live"; each step lists the test files it must add. A colocated

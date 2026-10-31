@@ -182,3 +182,15 @@ Differences from the spec above, for anyone reading this step later:
   like `readEvents`, and both readers order warnings by line.
   `NewTranscriptRecordSchema` (records minus `t`) is what step 07's
   parsers emit.
+- Revision R5: nothing in storage changes, but interpreting the event
+  log is engine logic, not UI logic. The original plan had the TUI
+  (step 11) reduce `events.jsonl` into per-step status and timestamps,
+  which put event interpretation on the UI side against the rule in
+  `CLAUDE.md`. That reduction now lives in `src/engine/run/view.ts`,
+  next to `events.ts`, and is exported from `src/engine/index.ts`:
+  `reduceSteps`, `applyEvent`, `reduceRun` and the `StepView`,
+  `AgentView` and `RunProgress` types. Step 08 creates it (the events
+  it reduces are produced there, and step 09's headless CLI already
+  needs it for durations); step 11 only wraps it in a store. The
+  reducer reads `RunEvent` exactly as `readEvents` returns it, open
+  member included, so it skips any event type it does not know.

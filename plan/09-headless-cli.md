@@ -29,7 +29,8 @@ stderr, exit 64.
 
 ## rensa run
 
-1. `Engine.open(process.cwd())`.
+1. `Engine.open(process.cwd())`. Nothing to wait for beyond that:
+   `start()` awaits the provider check itself.
 2. Determine input: positional text → `{kind:'text', text}`;
    `--input-file` → `{kind:'file', path}`; neither → `{kind:'none'}`.
    The engine validates against the chain's `input` kind.
@@ -40,7 +41,12 @@ stderr, exit 64.
    `handle.done`.
 5. Exit 0 on `complete`, 1 on `failed` or `aborted`.
 6. `SIGINT` (ctrl+c): first press calls `handle.abort()`; second press
-   within 2 s exits immediately with 130.
+   within 2 s exits immediately with 130. Install this listener before
+   `engine.start()`: step 06's shutdown module stands down on `SIGINT`
+   whenever another listener is registered, and with none it would exit
+   130 on the first press. The `process.exit(130)` on the second press
+   runs the shutdown callbacks (kill children, release lock) through
+   `'exit'`; do not duplicate that cleanup here.
 
 ## Output format (stdout)
 
@@ -66,7 +72,13 @@ One line per event, local time:
 - Tool records print as `▸ <name> <one-line input summary>` where the
   summary is the first string-valued field of `input` truncated to 80
   chars.
-- Durations are computed from event timestamps.
+- Durations are computed from event timestamps through step 08's
+  `view.ts`: keep a `Map<string, StepView>` seeded with
+  `initialSteps(chain.steps)` and fold every incoming event with
+  `applyEvent`; a `step finished` line prints `finishedAt − startedAt`
+  of that step, an `agent finished` line the same from its `AgentView`,
+  and the `run finished` line `reduceRun(events)`'s span. The CLI never
+  switches on event types to work out state; it only formats.
 - `--quiet` prints only `run`, `step`, and `agent` lines.
 - `--json` prints the raw event objects and transcript records as
   JSONL instead, for machines.
@@ -84,7 +96,9 @@ grok     not installed
 ```
 
 Exit 0 if every provider used by at least one chain in the repo is
-ready, else 1. Outside a repo, lists providers and exits 0.
+ready, else 1. Outside a repo, lists providers and exits 0. `doctor`
+is the one command that awaits `engine.providersChecked` directly,
+then reads `providers()` and `chains()`.
 
 ## Files to create
 
@@ -93,7 +107,7 @@ src/cli/args.ts
 src/cli/headless.ts
 src/cli/doctor.ts
 src/cli/format.ts          line formatting shared with doctor
-src/cli/main.ts            dispatch
+src/cli/main.ts            dispatch; imports args, headless, doctor and the engine statically, nothing from src/tui/
 src/cli/args.test.ts       colocated
 test/e2e/run.test.ts       e2e: spawns the built CLI with RENSA_DEV=1 against a tmp repo and a fake-provider chain
 test/e2e/doctor.test.ts    e2e: spawns `rensa doctor` the same way

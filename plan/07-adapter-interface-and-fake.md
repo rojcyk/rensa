@@ -110,6 +110,17 @@ timeout each; a timeout counts as `not_installed`. A helper
 `findOnPath(bin: string, env): Promise<string | undefined>` lives here
 for adapters to use.
 
+Every `available()` call, and the subprocess each real adapter spawns
+inside it, starts in the same tick as the `checkProviders` call: call
+all adapters first, then `Promise.all` the results, with no `await`
+before the calls. Step 08 calls this as the first statement of
+`Engine.open` and deliberately does not await it, so that the three
+provider subprocesses, the slowest part of startup, run while config
+discovery, chain loading and (in the TUI) the Ink module graph load.
+The eager start is what makes that overlap real; an adapter that awaits
+`findOnPath` before spawning its version check is still fine, as long
+as `findOnPath` itself starts its work synchronously.
+
 ## Fixture format (fixture.ts)
 
 A fixture is a directory:
@@ -141,7 +152,12 @@ lines.
 ## Fake adapter (fake/index.ts)
 
 - `capabilities()`: resume true, model true, effort all four, tools both.
-- `available()`: `ready`, version `fake`.
+- `available()`: `ready`, version `fake`. Two env hooks for tests:
+  `RENSA_FAKE_AVAILABILITY=not_installed|not_logged_in` returns that
+  status instead (with hint `fake login`), and
+  `RENSA_FAKE_AVAILABLE_DELAY_MS` delays the answer, so step 08 can
+  observe `Engine.open` resolving before the check and a missing
+  provider refusing a start.
 - `spawn(req)`: chooses a fixture directory from, in order,
   `req.env.RENSA_FAKE_FIXTURE`, else `test/fixtures/fake/hello`.
   Replays `raw.jsonl` lines with a configurable delay
@@ -168,6 +184,9 @@ lines.
 - `kill()` mid-replay yields exactly one `done` with `killed` message.
 - `checkProviders` with only `fake` registered returns one `ready`
   entry; stubs return `not_installed`.
+- `checkProviders` starts every adapter before awaiting any: with two
+  stub adapters whose `available()` records the time it was entered and
+  then waits 50 ms, both entry times precede the first resolution.
 - `findOnPath` finds `sh`, does not find `definitely-not-a-binary`.
 
 ## Verification (human)

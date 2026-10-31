@@ -5,7 +5,8 @@
 The one place in the codebase that spawns child processes, with the
 behaviors every consumer needs: process-group kill, timeout, line-by-line
 stdout and stderr, stdin writing, environment stripping. On top of it,
-the shell step executor.
+the shell step executor, and the one process-wide shutdown hook that
+every later step uses to clean up synchronously when the process dies.
 
 ## Context
 
@@ -17,10 +18,60 @@ do not add `cmd /c` branches.
 ```
 src/engine/process/env.ts
 src/engine/process/lines.ts
+src/engine/process/shutdown.ts
 src/engine/process/spawn.ts
 src/engine/process/shell.ts
 src/engine/process/*.test.ts     one per module, next to it
 ```
+
+## shutdown.ts
+
+```ts
+export function onShutdown(fn: () => void): () => void   // returns unregister
+export function runShutdown(): void                      // idempotent; the handlers call it
+```
+
+One registry of synchronous callbacks, run once in LIFO order (last
+registered runs first) when the process is about to die for any reason.
+This is the only place in the codebase that listens for process death;
+nothing else calls `process.on('exit')` or installs a signal handler
+for cleanup. Why: Claude Code restores raw mode and the alternate
+screen in a synchronous exit handler so a crash never leaves the
+terminal unusable; if the TUI (step 11), the lock (step 08) and the
+child kill (below) each registered their own `exit` handler, their
+order would be accidental and a throw in one would skip the rest.
+
+- Handlers, installed once at module load:
+  - `process.on('exit')` → `runShutdown()`. Covers every normal exit
+    and every `process.exit()` call.
+  - `SIGTERM` → `runShutdown()`, then `process.exit(143)`.
+  - `SIGINT` → if this module is the only `SIGINT` listener,
+    `runShutdown()` then `process.exit(130)`; otherwise do nothing and
+    let the other listener decide (step 09's headless CLI aborts the
+    run on the first ctrl+c; the TUI runs stdin in raw mode, so ctrl+c
+    never becomes a signal there). Whatever that listener does, its
+    eventual exit still runs the callbacks through `'exit'`.
+  - `uncaughtException` → `runShutdown()`, write the error's stack to
+    stderr, `process.exit(1)`. Restoring the terminal before printing
+    is the point: the stack has to be readable.
+- `runShutdown()`: guarded by a module flag so the callbacks run at
+  most once even when a signal handler and `'exit'` both fire. Each
+  callback runs in a `try`; a throw is written to stderr and the next
+  callback still runs. Everything in here is synchronous: no promises,
+  no timers; the event loop is gone by the time `'exit'` fires.
+- `onShutdown` returns an unregister function so a consumer that
+  cleaned up on the normal path (a released lock, a child that exited)
+  can drop its callback.
+
+Registration order is what makes the exit sequence deterministic.
+Engine modules register at module evaluation, not lazily: `spawn.ts`
+registers the child kill below and step 08's `lock.ts` registers the
+lock release, both at top level. `src/engine/index.ts` imports
+`process/spawn.js` before `run/lock.js` so the kill callback is
+registered first. The TUI registers its terminal restore from
+`main.ts`, after the engine has been imported, so it is always the
+last registration. LIFO then yields: terminal restore, kill live
+children, release lock.
 
 ## env.ts
 
@@ -63,6 +114,14 @@ export function spawnProcess(opts: SpawnOptions): Child
   `detached: true` puts the child in its own process group.
 - `kill()`: `process.kill(-pid, 'SIGTERM')`; after 5 s, if still
   running, `SIGKILL` the group. Idempotent.
+- Live-children registry: a module-level `Set<number>` of pgids. Add on
+  spawn, delete when the process exits. At module load, register one
+  callback through `onShutdown` that sends `SIGKILL` to every group
+  still in the set (`process.kill(-pid, 'SIGKILL')`, ignoring `ESRCH`).
+  No `SIGTERM`, no grace period: this path runs inside `'exit'`, where
+  timers never fire, so the only choice is kill now or leak the child.
+  Detached children survive their parent otherwise, which is exactly
+  what a crashed `rensa` must not leave behind.
 - Timeout: a timer that calls `kill()` and sets `timedOut`.
 - `ENOENT` on spawn rejects `result` with `RensaError('PROCESS')`
   naming `argv[0]`.
@@ -98,12 +157,22 @@ export async function runShellStep(opts: {
 
 - `childEnv` strips keys, keeps them with `allowApiKeys`, sets
   `NO_COLOR`.
+- `shutdown`: three callbacks run in LIFO order; a second
+  `runShutdown()` runs nothing; an unregistered callback does not run;
+  a callback that throws does not stop the ones after it. Test
+  `runShutdown()` directly; do not kill the test process. Confirm the
+  signal handlers exist with `process.listenerCount('SIGTERM')` and
+  `process.listenerCount('SIGINT')` after import.
 - `lineReader` with chunks split mid-line and mid-multibyte-character.
 - `spawnProcess`: `printf 'a\nb'` yields two lines including the
   unterminated one; a `sleep 10` with 200 ms timeout reports
   `timedOut`; a shell script that spawns a background `sleep` is fully
   killed (check with `ps` that the grandchild is gone after `kill()`);
   missing binary rejects with `PROCESS`.
+- Shutdown kill: spawn a `sleep 30`, call `runShutdown()`, check with
+  `ps` that the child is gone. Because `runShutdown` is once-only per
+  process, this test runs in its own file (`spawn.shutdown.test.ts`)
+  so vitest gives it its own worker.
 - `runShellStep`: exit code mapping, output file content equals combined
   lines, `onLine` called in order.
 
@@ -111,7 +180,9 @@ export async function runShellStep(opts: {
 
 Run the process tests on macOS and on Linux (CI covers Linux). Confirm
 the grandchild-kill test passes on macOS, where process-group semantics
-differ subtly.
+differ subtly. Then, from a scratch script that imports `spawnProcess`,
+start a `sleep 60` and send the script `SIGTERM`: `ps` must show no
+leftover `sleep`.
 
 ## Out of scope
 

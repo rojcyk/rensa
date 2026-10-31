@@ -49,7 +49,9 @@ by a crashed process may end mid-line; show the run, not an error.
 
 `run <last 4 of id> · <elapsed> · <state>` where state is `running`,
 `paused before <step>`, `paused after <step>`, `complete`, `failed`,
-`aborted`. Elapsed stops at `run.finished`. Color: `muted`; the state
+`aborted`. Elapsed is step 11's `<Elapsed since={progress.startedAt}
+until={progress.finishedAt}/>`, so it stops at `run.finished` and the
+status line itself never ticks. Color: `muted`; the state
 word in `accent` while running or paused, `ok` for complete, `err` for
 failed or aborted.
 
@@ -83,13 +85,60 @@ A vertical `│` in `dim` separates the columns, full height of the body.
 
    Token formatting: `< 1000` as is, else one decimal `k`. Elapsed as
    `m:ss`, `h:mm:ss` past an hour.
+
+   The spinner and elapsed cells are step 11's self-timing leaf
+   components (`<Spinner/>`, `<Elapsed since until/>`); the row itself
+   re-renders only on a status change. A row selects its own
+   `AgentView` from the store, so a tick in one cell, a token update on
+   another step, or a transcript delta never redraws it.
 4. Rule in `faint`.
 5. Transcript area: the rest of the body height.
 
 ### Transcript rendering
 
 Source: `view.transcript(step, label)` records plus the current partial
-line.
+line. The pane is virtualized: it mounts only what intersects the
+viewport, so frame cost stays flat however long the transcript gets.
+
+```ts
+interface TranscriptProps {
+  buffer: RingBuffer<TranscriptRecord>      // step 11; absolute record indices
+  partial?: string                          // the current streaming line, rendered after the last record
+  version: number                           // s.transcriptVersions.get(key); re-measures only indices ≥ last measured
+  scrollOffset: number                      // first visible wrapped line, counted from the top of the transcript
+  height: number                            // rows available to the pane; from step 11's useTerminalSize
+  width: number                             // column width; changes invalidate the wrap cache; debounced with it
+  expanded: ReadonlySet<number>             // record indices shown expanded (tool records)
+  cursor?: number                           // record index under the cursor
+}
+```
+
+- Measure in wrapped lines, not records. A wrap cache maps absolute
+  record index to that record's wrapped lines for the current `width`
+  (and, for a tool record, its expanded state); the record's height is
+  the array length. A prefix sum over heights maps `scrollOffset` to
+  the first intersecting record and the line offset inside it, and the
+  pane walks forward until `height` lines are filled. Records are
+  immutable once in the buffer, so an entry is computed once; the whole
+  cache is dropped when `width` changes, one entry when its record is
+  expanded or collapsed. The partial line is wrapped on every version
+  bump and never cached.
+- Exactly the intersecting records are mounted, each as a
+  `React.memo` row keyed by absolute index and given only the slice of
+  its wrapped lines that falls inside the window. A row's props change
+  only when it enters or leaves the window edge, is toggled, or becomes
+  the cursor; a version bump on the key re-renders the pane, which
+  measures the new records and re-renders the one or two rows at the
+  bottom edge, nothing above them.
+- `scrollOffset` is state of `Run.tsx`, per selected step; the total
+  wrapped height is the last prefix sum plus the partial line's height.
+  Following means `scrollOffset = max(0, total − height)` recomputed on
+  each version bump; detaching freezes it.
+- The pane never uses Ink's `<Static>`. `<Static>` appends to terminal
+  scrollback and is for output that will never move again, which
+  conflicts with a pane that scrolls in place; memoized virtual rows do
+  the same work inside the inline frame, which is the rendering mode
+  step 11 decided on.
 
 - `text`: wrapped to the column width, `text` color. The partial line
   renders in `muted` until finalized.
@@ -102,13 +151,13 @@ line.
 - Pending step: nothing below the rules except `not started` in `dim`.
 - Failed agent with an error: the error message rendered last in `err`,
   followed by `(transcript: <agent dir>)` in `dim`.
-- Scrolling: the area shows a window of lines; `pageUp`/`pageDown` move
-  by half the area height; `top`/`bottom` jump. While following, the
-  window sticks to the bottom; any manual scroll detaches the window
-  until `bottom`.
-- Finished steps render through `<Static>`-like memoized blocks: once a
-  step is finished, its transcript component is memoized on the record
-  count and never re-wraps.
+- Scrolling: `pageUp`/`pageDown` move `scrollOffset` by half the pane
+  height in wrapped lines; `top`/`bottom` jump to 0 and to
+  `total − height`. While following, the window sticks to the bottom;
+  any manual scroll detaches the window until `bottom`.
+- Finished steps need nothing special: their records are already
+  cached and their rows memoized, so a finished transcript costs one
+  prefix-sum lookup per frame and no re-wrapping.
 
 ### Keys
 
@@ -138,14 +187,17 @@ engine writes.
 
 ### End states
 
-Header state word and color change; spinners stop; the last step stays
+Header state word and color change; spinners unmount and every
+`Elapsed` gets its `until`, so no interval is left running; the last step stays
 selected unless the user moved; the note box goes inert. Nothing else
 changes.
 
 ### Finished run from disk
 
 `Run.tsx` takes either a live `RunHandle` or a `RunDir`; in the second
-case `RunView` is built by reading `events.jsonl` and transcripts once.
+case `RunView` is built once from `readEvents` through step 08's
+`reduceSteps(events, chain.steps)` and `reduceRun(events)`, with the
+ring buffers filled from `readTranscript`.
 No entry point in the MVP opens it that way (history screen deferred),
 but the component must support it so the deferred feature is a
 navigation change, not a rewrite. Test it.
@@ -156,21 +208,44 @@ navigation change, not a rewrite. Test it.
 src/tui/screens/Run.tsx
 src/tui/components/StepList.tsx
 src/tui/components/AgentRows.tsx
-src/tui/components/Transcript.tsx
+src/tui/components/Transcript.tsx     virtualized pane: wrap cache, prefix sum, memoized rows
 src/tui/components/StatusLine.tsx
-src/tui/format.ts                 elapsed, tokens, truncation helpers
+src/tui/format.ts                 elapsed, tokens, truncation and `wrapLines(text, width)` helpers
 src/tui/screens/Run.test.tsx
+src/tui/components/Transcript.test.tsx
 src/tui/format.test.ts
 ```
+
+`wrapLines` word-wraps on display width (`string-width`, already a
+dependency of Ink) and is the one wrapping routine the pane uses, so
+the measured height and the rendered height can never disagree. Ink's
+own `wrap` is not used inside the pane for the same reason.
 
 ## Tests
 
 - `format`: elapsed and token formatting edge cases.
 - Snapshot of the running mock from a scripted `RunView` fed with
   events from a fake-provider run.
+- Agent row isolation: with a render-count probe on `AgentRows`,
+  advancing fake timers by 5 s re-renders the leaves but not the row;
+  a transcript record on the same step does not re-render the row
+  either.
+- Transcript virtualization: a buffer of 5000 single-line records at
+  `height` 20 renders a frame of exactly 20 lines and mounts at most 20
+  rows (count with a probe on the row component); a `pageDown`
+  re-renders only the rows that entered the window; pushing one record
+  while following re-renders the pane and the bottom-edge row, not the
+  rows above; changing `width` re-wraps a long record to the new line
+  count; toggling a tool record changes only that record's height in
+  the prefix sum.
 - Keys: `right` selects the next step and detaches; `ctrl+f`
   reattaches; `pageDown` moves the window; `enter` on a tool line
   toggles expansion.
+- Input priority: with fake timers and the batcher holding several
+  hundred pending transcript events, writing `right` to stdin updates
+  the selected step in the next frame, before the batch flushes; no
+  key handler in `Run.tsx` is `async` (assert by reading the handler
+  functions' constructor name, or by lint).
 - Paused state renders `‖` and the status word; `enter` with text calls
   `note` then `resume`.
 - Finished run loaded from a run directory renders without a handle.
