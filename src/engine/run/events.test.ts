@@ -140,6 +140,50 @@ describe('reading events back', () => {
     expect(await readEvents(file)).toEqual({ events: written, warnings: [] })
   })
 
+  it.each<[string, NewRunEvent]>([
+    [
+      'run.started with a file input',
+      { type: 'run.started', data: { ...STARTED.data, input_kind: 'file', input_path: 'spec.md' } },
+    ],
+    [
+      'run.paused by the user',
+      { type: 'run.paused', data: { before: 'fix-impl', reason: 'user' } },
+    ],
+    [
+      'run.finished failed',
+      { type: 'run.finished', data: { status: 'failed', failed_step: 'test' } },
+    ],
+    [
+      'step.started for a shell step',
+      { type: 'step.started', step: 'test', data: { kind: 'shell', command: 'npm test' } },
+    ],
+    [
+      'step.finished with an exit code',
+      { type: 'step.finished', step: 'test', data: { status: 'failed', exit_code: 1 } },
+    ],
+    ['agent.spawned', SPAWNED],
+    [
+      'agent.finished with an error',
+      {
+        type: 'agent.finished',
+        step: 'review',
+        agent: 'codex',
+        data: { status: 'failed', error: { kind: 'usage_limit', message: 'weekly limit reached' } },
+      },
+    ],
+    [
+      'user.note',
+      { type: 'user.note', data: { text: 'Skip the lint step.', applies_from: 'test' } },
+    ],
+    ['user.action kill', { type: 'user.action', data: { action: 'kill', step: 'review' } }],
+  ])('reads back %s exactly as appended', async (_, event) => {
+    const log = await EventLog.create(file)
+    const written = log.append(event)
+    await log.close()
+
+    expect(await readEvents(file)).toEqual({ events: [written], warnings: [] })
+  })
+
   it('reports two warnings when the file has a garbage middle line and a truncated last line', async () => {
     const first: RunEvent = { ...STARTED, seq: 1, t: '2026-10-28T09:12:03.418Z' }
     const second: RunEvent = { ...SPAWNED, seq: 2, t: '2026-10-28T09:12:04.007Z' }
@@ -174,6 +218,7 @@ describe('reading events back', () => {
 
   it.each<[string, unknown]>([
     ['seq is missing', { t: '2026-10-28T09:12:03.418Z', type: 'run.started' }],
+    ['seq is zero', { seq: 0, t: '2026-10-28T09:12:03.418Z', type: 'run.started' }],
     ['seq is a string', { seq: '1', t: '2026-10-28T09:12:03.418Z', type: 'run.started' }],
     ['t is missing', { seq: 1, type: 'run.started' }],
     ['type is missing', { seq: 1, t: '2026-10-28T09:12:03.418Z' }],
@@ -188,5 +233,55 @@ describe('reading events back', () => {
       events: [valid],
       warnings: ['line 2: not an event'],
     })
+  })
+
+  const base = { seq: 2, t: '2026-10-28T09:12:04.007Z' }
+
+  it.each<[string, unknown]>([
+    ['run.started lacks base_sha', { ...base, type: 'run.started', data: { chain: 'tdd-review' } }],
+    ['run.started has no data', { ...base, type: 'run.started' }],
+    ['step.started has no step', { ...base, type: 'step.started', data: { kind: 'shell' } }],
+    [
+      'agent.spawned has tools outside read|write',
+      { ...SPAWNED, ...base, data: { ...SPAWNED.data, tools: 'all' } },
+    ],
+    [
+      'agent.finished has usage counts as strings',
+      { ...FINISHED, ...base, data: { ...FINISHED.data, usage: { input: '18k', output: 2_107 } } },
+    ],
+    [
+      'agent.finished has an error of an unknown kind',
+      {
+        ...FINISHED,
+        ...base,
+        data: { status: 'failed', error: { kind: 'oom', message: 'killed' } },
+      },
+    ],
+    [
+      'user.action names an unknown action',
+      { ...base, type: 'user.action', data: { action: 'retry' } },
+    ],
+  ])('skips a known event whose payload is wrong when %s', async (_, value) => {
+    const valid: RunEvent = { ...STARTED, seq: 1, t: '2026-10-28T09:12:03.418Z' }
+    await writeFile(file, `${JSON.stringify(valid)}\n${JSON.stringify(value)}\n`)
+
+    expect(await readEvents(file)).toEqual({
+      events: [valid],
+      warnings: ['line 2: not an event'],
+    })
+  })
+
+  it('drops fields outside the schema from a known event when a newer writer added them', async () => {
+    const written = {
+      ...STARTED,
+      seq: 1,
+      t: '2026-10-28T09:12:03.418Z',
+      data: { ...STARTED.data, operator: 'alice' },
+    }
+    await writeFile(file, `${JSON.stringify(written)}\n`)
+
+    const { events } = await readEvents(file)
+
+    expect(events).toEqual([{ ...STARTED, seq: 1, t: '2026-10-28T09:12:03.418Z' }])
   })
 })

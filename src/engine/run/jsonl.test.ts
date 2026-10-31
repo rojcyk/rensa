@@ -3,7 +3,7 @@ import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it } from 'vitest'
 import { type TmpDir, tmpDir } from '../../testing/tmpRepo.js'
 import { RensaError } from '../errors.js'
-import { AppendQueue, isRecord, parseJsonLines } from './jsonl.js'
+import { AppendQueue, inLineOrder, isRecord, parseJsonLines } from './jsonl.js'
 
 let tmp: TmpDir
 
@@ -191,6 +191,22 @@ describe('parsing newline-delimited JSON', () => {
 
   it('returns no values and no warnings for an empty file', () => {
     expect(parseJsonLines('')).toEqual({ values: [], warnings: [] })
+  })
+})
+
+describe('ordering warnings', () => {
+  it('sorts warnings by their line number when two sources contributed out of order', () => {
+    const warnings = [
+      'line 2: not valid JSON',
+      'line 10: truncated final line',
+      'line 3: not an event',
+    ]
+
+    expect(inLineOrder(warnings)).toEqual([
+      'line 2: not valid JSON',
+      'line 3: not an event',
+      'line 10: truncated final line',
+    ])
   })
 })
 

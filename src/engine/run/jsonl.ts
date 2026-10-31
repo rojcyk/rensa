@@ -82,6 +82,12 @@ export function parseJsonLines(text: string): ParsedLines {
   return { values, warnings }
 }
 
+/** Sorts `line N: ...` warnings by N, so parse and shape warnings interleave in file order. */
+export function inLineOrder(warnings: readonly string[]): string[] {
+  const line = (w: string) => Number(/^line (\d+)/.exec(w)?.[1] ?? Number.MAX_SAFE_INTEGER)
+  return [...warnings].sort((a, b) => line(a) - line(b))
+}
+
 /** True for a non-null, non-array object. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { AgentFileName, RunDir } from './dir.js'
-import { AppendQueue, isRecord, parseJsonLines } from './jsonl.js'
-import type { NewTranscriptRecord, TranscriptRecord } from './types.js'
+import { AppendQueue, inLineOrder, parseJsonLines } from './jsonl.js'
+import { type NewTranscriptRecord, type TranscriptRecord, TranscriptRecordSchema } from './types.js'
 
 /**
  * Writes one agent's files under `agents/<step>/<label>/`: the provider's
@@ -60,17 +60,20 @@ export class TranscriptWriter {
   }
 }
 
-/**
- * Reads `transcript.jsonl`, skipping lines that are not records, such as
- * a final line still being written.
- */
-export async function readTranscript(file: string): Promise<TranscriptRecord[]> {
+export interface ReadTranscript {
+  records: TranscriptRecord[]
+  /** One per skipped line; a final line still being written is one of them. */
+  warnings: string[]
+}
+
+/** Reads `transcript.jsonl`, skipping lines that are not records, with a warning each. */
+export async function readTranscript(file: string): Promise<ReadTranscript> {
+  const { values, warnings } = parseJsonLines(await readFile(file, 'utf8'))
   const records: TranscriptRecord[] = []
-  for (const { value } of parseJsonLines(await readFile(file, 'utf8')).values) {
-    if (isRecord(value) && typeof value.t === 'string' && typeof value.kind === 'string') {
-      // Common fields checked above; the rest is trusted as the writer's.
-      records.push(value as TranscriptRecord)
-    }
+  for (const { line, value } of values) {
+    const result = TranscriptRecordSchema.safeParse(value)
+    if (result.success) records.push(result.data)
+    else warnings.push(`line ${line}: not a transcript record`)
   }
-  return records
+  return { records, warnings: inLineOrder(warnings) }
 }

@@ -19,7 +19,7 @@ export { RensaError, type RensaErrorCode } from './errors.js'
 export { type AgentFileName, openRunDir, type RunDir } from './run/dir.js'
 export { type ReadEvents, readEvents } from './run/events.js'
 export { type RunJson, readRunJson } from './run/runjson.js'
-export { readTranscript } from './run/transcript.js'
+export { type ReadTranscript, readTranscript } from './run/transcript.js'
 export type {
   AgentError,
   RunEvent,

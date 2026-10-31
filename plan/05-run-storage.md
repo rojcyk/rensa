@@ -171,3 +171,14 @@ Differences from the spec above, for anyone reading this step later:
 - The engine index exports the read side only (`openRunDir`,
   `readEvents`, `readTranscript`, `readRunJson`, and the event and
   transcript types). Writers stay engine-internal.
+- Revision R2: `types.ts` declares the event union, the transcript
+  records, `Usage` and `AgentError` as zod schemas and derives the types
+  from them. `readEvents` and `readTranscript` check every line with
+  `safeParse`; a known `type` whose payload does not fit is a warning,
+  not an event. `RunEventSchema` ends in a passthrough member for types
+  this version does not know, so `RunEvent` has an open member and
+  consumers need a default branch; `KnownRunEvent` is the closed union
+  the writer produces. `readTranscript` returns `{ records, warnings }`
+  like `readEvents`, and both readers order warnings by line.
+  `NewTranscriptRecordSchema` (records minus `t`) is what step 07's
+  parsers emit.

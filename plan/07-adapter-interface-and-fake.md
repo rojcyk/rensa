@@ -10,7 +10,11 @@ without any real CLI.
 
 ## Context
 
-Steps 01–06 merged.
+Steps 01–06 merged. Step 05's `src/engine/run/types.ts` declares
+`TranscriptRecordSchema`, `NewTranscriptRecordSchema`, `UsageSchema` and
+`AgentErrorSchema` as zod schemas and derives the types from them. This
+step reuses those; it declares no second version of a record, a usage
+block or an agent error.
 
 ## Files to create
 
@@ -48,14 +52,16 @@ interface SpawnRequest {
 }
 
 type AgentEvent =
-  | { kind: 'text'; text: string; partial: boolean }          // partial=true for streaming deltas
-  | { kind: 'tool'; name: string; input: unknown; ok: boolean; output: string }
+  | NewTranscriptRecord                                       // text | tool | note, from step 05's
+                                                              // NewTranscriptRecordSchema; the engine
+                                                              // stamps `t` and appends it unchanged
+  | { kind: 'delta'; text: string }                           // streaming text, display only
   | { kind: 'raw'; line: string }                             // every raw stdout line, before parsing
   | { kind: 'usage'; usage: Usage }
   | { kind: 'done'; reply: string; exitCode: number | null; usage?: Usage; error?: AgentError; sessionId?: string }
 // sessionId: set only by adapters whose CLI assigns its own session id (Codex);
 // the engine records it in run.json in place of the id it generated.
-interface AgentError { kind: 'usage_limit' | 'auth' | 'exit' | 'no_output'; message: string }
+// Usage and AgentError are step 05's types (UsageSchema, AgentErrorSchema).
 
 interface AgentProcess { pid?: number; kill(): void; events: AsyncIterable<AgentEvent> }
 
@@ -73,9 +79,10 @@ Rules every adapter follows:
   spawn failure (then `exitCode: null`, `error.kind: 'exit'`).
 - `raw` is emitted for every line before any other event derived from
   it, so `raw.jsonl` is complete.
-- `text` with `partial: true` carries only the new delta; a following
-  `text` with `partial: false` carries the full block and supersedes
-  the deltas for that block.
+- `delta` carries only new text, for display while a block streams; the
+  `text` record that follows carries the full block and supersedes the
+  deltas for that block. Only records reach `transcript.jsonl`; deltas
+  never do.
 - The adapter never writes to the run directory itself except inside
   `stagingDir`, and never prints.
 
@@ -124,6 +131,13 @@ adapter's parser and asserts the transcript, reply, and done output
 match. Parsers are therefore exposed as a pure function on each adapter:
 `parse(lines: AsyncIterable<string>): AsyncIterable<AgentEvent>`.
 
+`loadFixture` parses each `transcript.jsonl` line with
+`TranscriptRecordSchema` and fails loudly on the first line that does
+not fit, so a mistyped fixture is reported as such and not as a diff
+against the adapter's output. `fixtureTest` compares the records the
+parser emitted, stamped with the fixture's `t` values, against those
+lines.
+
 ## Fake adapter (fake/index.ts)
 
 - `capabilities()`: resume true, model true, effort all four, tools both.
@@ -135,7 +149,7 @@ match. Parsers are therefore exposed as a pure function on each adapter:
   understands a tiny JSONL dialect:
 
   ```
-  {"type":"text","text":"...","partial":true}
+  {"type":"delta","text":"..."}
   {"type":"text","text":"..."}
   {"type":"tool","name":"Read","input":{"path":"x"},"ok":true,"output":"..."}
   {"type":"usage","input":10,"output":20}

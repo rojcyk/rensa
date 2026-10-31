@@ -105,7 +105,10 @@ describe('writing agent files', () => {
     expect(await readFile(run.agentFile(STEP, LABEL, 'raw.jsonl'), 'utf8')).toBe(
       '{"type":"turn.started"}\n',
     )
-    expect(await readTranscript(run.agentFile(STEP, LABEL, 'transcript.jsonl'))).toEqual([record])
+    expect(await readTranscript(run.agentFile(STEP, LABEL, 'transcript.jsonl'))).toEqual({
+      records: [record],
+      warnings: [],
+    })
   })
 
   it('writes reply.md with the given text', async () => {
@@ -140,16 +143,20 @@ describe('reading a transcript', () => {
     const written = [writer.record(TEXT), writer.record(TOOL), writer.record(NOTE)]
     await writer.close()
 
-    expect(await readTranscript(run.agentFile(STEP, LABEL, 'transcript.jsonl'))).toEqual(written)
+    expect(await readTranscript(run.agentFile(STEP, LABEL, 'transcript.jsonl'))).toEqual({
+      records: written,
+      warnings: [],
+    })
   })
 
-  it('skips lines that are not records, including a final line still being written', async () => {
+  const record: TranscriptRecord = {
+    t: '2026-10-28T09:13:22.051Z',
+    kind: 'text',
+    text: 'Looking at src/cart.ts.',
+  }
+
+  it('skips lines that are not records with one warning each, including a final line still being written', async () => {
     const file = path.join(tmp.dir, 'transcript.jsonl')
-    const record: TranscriptRecord = {
-      t: '2026-10-28T09:13:22.051Z',
-      kind: 'text',
-      text: 'Looking at src/cart.ts.',
-    }
     await writeFile(
       file,
       [
@@ -162,6 +169,30 @@ describe('reading a transcript', () => {
       ].join('\n'),
     )
 
-    expect(await readTranscript(file)).toEqual([record])
+    expect(await readTranscript(file)).toEqual({
+      records: [record],
+      warnings: [
+        'line 2: not valid JSON',
+        'line 3: not a transcript record',
+        'line 4: not a transcript record',
+        'line 5: not a transcript record',
+        'line 6: truncated final line',
+      ],
+    })
+  })
+
+  it.each<[string, unknown]>([
+    ['a tool record lacks ok and output', { t: record.t, kind: 'tool', name: 'shell', input: {} }],
+    ['a tool record has ok as a string', { ...TOOL, t: record.t, ok: 'false' }],
+    ['a text record has a number for text', { t: record.t, kind: 'text', text: 42 }],
+    ['the kind is one this version does not know', { t: record.t, kind: 'thinking', text: '...' }],
+  ])('skips a record that does not fit the schema when %s', async (_, value) => {
+    const file = path.join(tmp.dir, 'transcript.jsonl')
+    await writeFile(file, `${JSON.stringify(record)}\n${JSON.stringify(value)}\n`)
+
+    expect(await readTranscript(file)).toEqual({
+      records: [record],
+      warnings: ['line 2: not a transcript record'],
+    })
   })
 })
