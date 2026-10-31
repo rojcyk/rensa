@@ -94,6 +94,18 @@ For each step in order:
    live pane under label `shell`, into a `TranscriptWriter` for
    `(step.id, 'shell')`. On completion store the `StepResult`
    (`output` = `tail(full, 16384, outputPath)`), emit `step.finished`.
+
+   Always set `passed` and `exit_code` on a shell `StepResult`, for
+   every status. They are optional on the type, but load-time
+   validation (step 03) accepts `steps.<id>.passed` and
+   `steps.<id>.exit_code` for any earlier shell step. If one is unset,
+   a later prompt or var that references it fails at runtime with
+   `TEMPLATE`. The trap: step 06's `exitCode` is `null` when the
+   process died from a signal (`killed`, `timeout`), so copying it
+   across leaves `exit_code` unset. Set `passed = status === 'ok'`.
+   For a `null` exit code, store 128 + the signal number (the shell
+   convention: SIGTERM → 143, SIGKILL → 137), which means passing the
+   signal through from `SpawnResult` into `ShellStepResult`.
 4. Agent step:
    - Build the namespace (`input`, `input_path`, `base`, `run_id`,
      prior `steps`), evaluate `vars`, render the step prompt, append
@@ -172,6 +184,10 @@ transcript writers, update `run.json` (`finished_at`, `status`,
   `LOCKED`; a stale lock with a dead pid is replaced.
 - Headless with pauses refuses without `noPause`, runs with it.
 - Timeout on a shell step (`sleep 5`, 200 ms) yields `timeout`.
+- A shell step that times out with `on_fail: continue`, followed by an
+  agent step whose prompt uses `{{steps.x.exit_code}}` and
+  `{{steps.x.passed}}`: the prompt renders `143` and `false` instead of
+  failing with `TEMPLATE`.
 
 ## Verification (human)
 

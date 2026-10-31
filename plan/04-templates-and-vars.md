@@ -52,10 +52,15 @@ export async function evaluateVars(
   the namespace first (so `{{base}}` works inside a literal).
 - `ref`: `lookup`; `undefined` → `RensaError('TEMPLATE')` naming the var
   and the path.
-- `shell`: render placeholders inside the command against the namespace
-  (so `$(git diff {{base}})` works), then run with `/bin/sh -c` in
+- `shell`: bind placeholders inside the command against the namespace
+  (so `$(git diff {{base}})` works) with `renderForShell`: each value
+  goes into an env var and the command expands it, quoted for the
+  context it sits in, so input and agent output are data, never code.
+  Then run with `/bin/sh -c` in
   `cwd`, stdin closed, 60 s timeout, env from step 06's `childEnv` once
-  it exists (for now `process.env`). Non-zero exit →
+  it exists (for now `process.env`). Stdout over 10 MiB kills the
+  process group and fails like a timeout. Non-zero exit, timeout, or a
+  kill by rensa (even if the shell itself exited 0) →
   `RensaError('TEMPLATE')` with the command and the first 500 chars of
   stderr. Value is stdout with one trailing newline stripped.
 
@@ -102,8 +107,10 @@ JSON. Entries separated by one blank line. Always use this form, even
 for a single entry.
 
 `tail`: if `text` is within `maxBytes` (UTF-8), return it. Otherwise
-return the last `maxBytes` bytes, cut forward to the first newline, with
-a first line `[… <n> bytes cut; full output: <fullPath>]`. Default
+return the last `maxBytes` bytes, cut forward to the first line start
+(staying put if the cut already is one), with a first line
+`[… <n> bytes cut; full output: <fullPath>]`. If no whole line fits,
+keep the end of the last line, starting on a whole UTF-8 character. Default
 `maxBytes` 16384 at the call site in step 08.
 
 `extractTrailingJson`: find the last top-level JSON object in `text`.

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { RensaError } from '../errors.js'
+import { findPlaceholders } from '../template/render.js'
 import { describe, isMapping } from './load.js'
 import type {
   AgentStep,
@@ -180,7 +181,6 @@ const STEP_FIELDS: Record<Step['kind'], readonly string[]> = {
   shell: ['output', 'passed', 'exit_code'],
   agent: ['output', 'text'],
 }
-const PLACEHOLDER = /\{\{\s*([a-z_][\w.-]*)\s*\}\}/gi
 
 export async function validateChain(chain: UnvalidatedChain): Promise<ResolvedChain> {
   const errors: RensaError[] = []
@@ -212,7 +212,7 @@ export async function validateChain(chain: UnvalidatedChain): Promise<ResolvedCh
           errors.push(text)
           continue
         }
-        for (const name of placeholders(text)) {
+        for (const name of findPlaceholders(text)) {
           used.add(name)
           const problem = checkPlaceholder(name, step.vars, seen, chain)
           if (problem) errors.push(invalid(source.loc, `${problem} in ${source.file}`))
@@ -227,7 +227,7 @@ export async function validateChain(chain: UnvalidatedChain): Promise<ResolvedCh
           if (problem) errors.push(invalid(varLoc, problem))
           continue
         }
-        for (const inner of placeholders(spec.value)) {
+        for (const inner of findPlaceholders(spec.value)) {
           const problem = checkPlaceholder(inner, undefined, seen, chain)
           if (problem) errors.push(invalid(varLoc, `${problem} in var \`${name}\``))
         }
@@ -253,10 +253,6 @@ export async function validateChain(chain: UnvalidatedChain): Promise<ResolvedCh
   }
   const writes = chain.steps.some((s) => s.kind === 'shell' || s.agent.tools === 'write')
   return { ...chain, writes, warnings }
-}
-
-function placeholders(text: string): string[] {
-  return Array.from(text.matchAll(PLACEHOLDER), (m) => m[1] ?? '')
 }
 
 /**

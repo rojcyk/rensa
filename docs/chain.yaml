@@ -131,7 +131,8 @@ steps:
     # braces are left untouched. Value forms:
     #   literal        plain string
     #   $(command)     shell command in the repo root, stdout captured;
-    #                  other variables may appear inside
+    #                  other variables may appear inside; each reaches
+    #                  the shell as one word, never parsed as code
     #   steps.<id>.<field>
     #                  reference into the namespace below; any other
     #                  dotted value (package.json, v1.2.3) is a literal
