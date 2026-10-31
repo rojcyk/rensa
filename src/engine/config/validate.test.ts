@@ -186,6 +186,36 @@ describe('raw chain shape', () => {
     expect(err.message.startsWith(`${FILE}: `)).toBe(true)
   })
 
+  it.each(['../../../..', 'team/rev', 'code review', 'rev.v2'])(
+    'rejects the registry name %j because it would become a directory under the run',
+    (name) => {
+      const doc = {
+        agents: { [name]: { provider: 'claude', tools: 'read' } },
+        steps: [{ id: 'lint', run: 'npm run lint' }],
+      }
+
+      const err = catchRensa(() => checkRawChain(doc, FILE))
+
+      expect(err.code).toBe('CONFIG_INVALID')
+      expect(err.path).toBe(`agents.${name}`)
+      expect(err.message).toBe(
+        `${FILE}: agent name \`${name}\` may contain only letters, digits, \`_\` and \`-\``,
+      )
+    },
+  )
+
+  it('accepts registry names of mixed-case letters, digits, _ and -', () => {
+    const doc = {
+      agents: {
+        Reviewer_2: { provider: 'claude', tools: 'read' },
+        'code-review': { provider: 'codex', tools: 'read' },
+      },
+      steps: [{ id: 'lint', run: 'npm run lint' }],
+    }
+
+    expect(checkRawChain(doc, FILE)).toBe(doc)
+  })
+
   it('rejects a chain without steps with a message naming the file', () => {
     const err = catchRensa(() => checkRawChain({ name: 'review' }, FILE))
 
@@ -229,6 +259,16 @@ describe('raw project shape', () => {
 
     expect(err.code).toBe('CONFIG_INVALID')
     expect(err.path).toBe(keyPath)
+  })
+
+  it('rejects a registry name containing a path separator with path agents.<name>', () => {
+    const doc = { agents: { 'team/rev': { provider: 'codex', tools: 'read' } } }
+
+    const err = catchRensa(() => checkRawProject(doc, FILE))
+
+    expect(err.code).toBe('CONFIG_INVALID')
+    expect(err.path).toBe('agents.team/rev')
+    expect(err.message).toContain('agent name `team/rev` may contain only letters')
   })
 
   it.each<[string, Record<string, unknown>]>([
@@ -589,6 +629,37 @@ describe('resolved chain validation', () => {
 
       expect(err.path).toBe('steps[2].id')
       expect(err.message).toBe(`${chainFile}: duplicate step id \`lint\``)
+    })
+
+    it('reports steps[i].id when a later id differs from an earlier one only in case', async () => {
+      const chain = chainOf([shellStep('review'), shellStep('lint'), shellStep('Review')])
+
+      const err = await validationError(chain)
+
+      expect(err.path).toBe('steps[2].id')
+      expect(err.message).toBe(
+        `${chainFile}: step id \`Review\` differs from \`review\` only in case; step ids name directories, which some filesystems treat as the same`,
+      )
+    })
+
+    it('reports only duplicate step id, not also a case clash, when an id repeats exactly', async () => {
+      const chain = chainOf([shellStep('review'), shellStep('review')])
+
+      const err = await validationError(chain)
+
+      expect(err.message).toBe(`${chainFile}: duplicate step id \`review\``)
+      expect(err.details).toEqual([])
+    })
+
+    it('reports one problem per later step when ids repeat both exactly and by case', async () => {
+      const chain = chainOf([shellStep('review'), shellStep('Review'), shellStep('Review')])
+
+      const err = await validationError(chain)
+
+      expect([err.message, ...(err.details ?? [])]).toEqual([
+        `${chainFile}: step id \`Review\` differs from \`review\` only in case; step ids name directories, which some filesystems treat as the same`,
+        `${chainFile}: duplicate step id \`Review\``,
+      ])
     })
   })
 

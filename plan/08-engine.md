@@ -13,6 +13,30 @@ step a chain runs end to end on the fake provider with no UI.
 Steps 01–07 merged. Public surface is fixed in `plan/index.md`
 ("Engine surface"); implement exactly that.
 
+### Notes from step 05
+
+- Run ids can collide: two runs of the same chain started in the same
+  minute share the id with probability 1 in 65,536. `createRunDir`
+  then rejects with `EEXIST` rather than overwriting. Catch that,
+  generate a new id, and retry a few times before failing.
+- After a failed write, `EventLog.append` still emits `'event'` and
+  returns the event, but the line is dropped; the error only surfaces
+  from the next `flush()` or `close()`. `TranscriptWriter` behaves the
+  same. Await `flush()` on the event log after every `step.finished`
+  so the UI never runs more than one step ahead of the file. A
+  rejection is fatal: stop the run and resolve `handle.done` with
+  `failed`. The log cannot record `run.finished` at that point, so the
+  error has to reach the caller some other way, not only the log.
+- `TranscriptWriter.prompt()` and `reply()` do not check whether the
+  writer is closed; write them before `close()`.
+- `run.json` is plain JSON, so an agent whose status is `undefined` in
+  `steps.<id>.agents` is dropped on write. Write `run.json` at the end
+  with every agent's final status set, or omit the agent.
+- `readRunJson` throws the raw `ENOENT` for a missing file; it raises
+  `RensaError('INTERNAL')` only for invalid JSON or the wrong shape.
+- A shell step's transcript goes through `TranscriptWriter` with label
+  `shell`, so it lands in `agents/<step>/shell/`.
+
 ## Files to create
 
 ```

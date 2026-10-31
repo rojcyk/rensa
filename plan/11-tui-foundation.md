@@ -14,6 +14,13 @@ Steps 01–10 merged. Screens are specified in steps 12–14; this step
 builds only what they share. The architecture rule applies: this
 directory imports the engine only through `src/engine/index.ts`.
 
+### Notes from step 05
+
+`readEvents` passes events with an unknown `type` through untouched
+(forward compatibility with newer runs). `reduceSteps` must ignore an
+event it does not recognise, never throw on it, so give its `switch` a
+default branch that skips the event.
+
 ## Files to create
 
 ```

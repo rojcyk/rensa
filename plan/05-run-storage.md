@@ -147,3 +147,27 @@ Inspect a generated run directory from the tests (keep one via a
 ## Out of scope
 
 Producing any real event; that is the engine's job.
+
+## As built
+
+Differences from the spec above, for anyone reading this step later:
+
+- `src/engine/run/jsonl.ts` was added: `AppendQueue` (the shared
+  one-writer queue) and `parseJsonLines` (the shared tolerant reader),
+  used by both `events.ts` and `transcript.ts`.
+- `readEvents` returns `{ events, warnings }`. Warnings are strings like
+  `line 3: not valid JSON`, `line 9: truncated final line`,
+  `line 4: not an event`.
+- `EventLog.create` and `createRunDir` fail with `EEXIST` if the file or
+  directory already exists.
+- Step 03 validation was tightened alongside this step, because names
+  become directory names under the run: chain names, agent registry
+  names, and step ids may contain only letters, digits, `_` and `-`,
+  and two step ids may not differ only in case (`review` and `Review`
+  share a directory on macOS and Windows).
+- The "uniqueness over 100 calls" test asserts at least 95 distinct ids:
+  the 16-bit suffix makes a collision among 100 ids in one minute about
+  7% likely, so "all 100" would be a flaky test.
+- The engine index exports the read side only (`openRunDir`,
+  `readEvents`, `readTranscript`, `readRunJson`, and the event and
+  transcript types). Writers stay engine-internal.

@@ -26,6 +26,8 @@ import {
 } from './types.js'
 import { child, invalid, type Loc, type UnvalidatedChain } from './validate.js'
 
+const CHAIN_NAME = /^[a-z0-9_-]+$/i
+
 export interface ResolveInput {
   /** File stem of the chain file. */
   name: string
@@ -42,6 +44,13 @@ export interface ResolveInput {
 export async function resolveChain(input: ResolveInput): Promise<UnvalidatedChain> {
   const { raw, file } = input.chain
   const root: Loc = { file, at: '' }
+  // The name ends up in run ids and directory names.
+  if (!CHAIN_NAME.test(input.name)) {
+    throw invalid(
+      root,
+      `chain name \`${input.name}\` may contain only letters, digits, \`_\` and \`-\`; rename the file`,
+    )
+  }
   if (raw.name !== undefined && raw.name !== input.name) {
     throw invalid(
       child(root, 'name'),

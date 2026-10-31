@@ -16,3 +16,16 @@ export type {
 } from './config/types.js'
 export { validateWithAdapters } from './config/validate.js'
 export { RensaError, type RensaErrorCode } from './errors.js'
+export { type AgentFileName, openRunDir, type RunDir } from './run/dir.js'
+export { type ReadEvents, readEvents } from './run/events.js'
+export { type RunJson, readRunJson } from './run/runjson.js'
+export { readTranscript } from './run/transcript.js'
+export type {
+  AgentError,
+  RunEvent,
+  RunEventType,
+  RunStatus,
+  StepStatus,
+  TranscriptRecord,
+  Usage,
+} from './run/types.js'

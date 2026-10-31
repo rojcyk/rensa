@@ -719,6 +719,24 @@ describe('chain-level fields', () => {
     )
   })
 
+  it.each(['tdd review', 'review.v2', '../review', 'rëview', ''])(
+    'rejects the chain name %j when the file stem has characters outside letters, digits, _ and -',
+    async (name) => {
+      const err = await resolveError({ chain: chainOf([shellStep()]), name })
+
+      expect(err.path).toBe('')
+      expect(err.message).toBe(
+        `${CHAIN_FILE}: chain name \`${name}\` may contain only letters, digits, \`_\` and \`-\`; rename the file`,
+      )
+    },
+  )
+
+  it('accepts a chain name of mixed-case letters, digits, _ and -', async () => {
+    const resolved = await resolve({ chain: chainOf([shellStep()]), name: 'TDD_review-2' })
+
+    expect(resolved.name).toBe('TDD_review-2')
+  })
+
   it('accepts a name key equal to the file stem and keeps the description', async () => {
     const chain = chainOf([shellStep()], { name: 'review', description: 'Lint the repo.' })
 

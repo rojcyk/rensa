@@ -12,6 +12,15 @@ end states. This completes the TUI MVP (dogfooding milestone 2).
 Steps 01–13 merged. All data comes from `RunView` (step 11) and the
 transcript ring buffers; the screen computes nothing beyond layout.
 
+### Notes from step 05
+
+For a finished run read from disk, the engine index already exports
+`openRunDir`, `readEvents` (returns `{ events, warnings }`),
+`readTranscript`, and `readRunJson`. `readEvents` skips bad lines and
+reports each as a warning; `readTranscript` skips them silently,
+including a final line still being written. A run directory written
+by a crashed process may end mid-line; show the run, not an error.
+
 ## Layout
 
 ```

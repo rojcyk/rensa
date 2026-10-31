@@ -80,9 +80,19 @@ export function checkRawProject(doc: Record<string, unknown>, file: string): Raw
   return doc as RawProject
 }
 
+// A registry name becomes the agent's label, which is a directory name
+// under the run and a key in `steps.<id>.output.<label>`.
+const AGENT_NAME = /^[a-z0-9_-]+$/i
+
 function checkRegistry(value: unknown, loc: Loc): asserts value is Record<string, RawAgent> {
   const agents = expectMapping(value, loc)
   for (const [name, entry] of Object.entries(agents)) {
+    if (!AGENT_NAME.test(name)) {
+      throw invalid(
+        child(loc, name),
+        `agent name \`${name}\` may contain only letters, digits, \`_\` and \`-\``,
+      )
+    }
     checkAgent(entry, child(loc, name), AGENT_KEYS)
   }
 }
@@ -188,12 +198,22 @@ export async function validateChain(chain: UnvalidatedChain): Promise<ResolvedCh
   const root: Loc = { file: chain.sources.chain, at: '' }
   /** Earlier step ids and their kinds. */
   const seen = new Map<string, Step['kind']>()
+  /** Earlier step ids by their lower-case form. */
+  const folded = new Map<string, string>()
   const read = cachedReader()
 
   for (const [i, step] of chain.steps.entries()) {
     const loc = child(child(root, 'steps'), i)
+    const earlier = folded.get(step.id.toLowerCase())
     if (seen.has(step.id)) {
       errors.push(invalid(child(loc, 'id'), `duplicate step id \`${step.id}\``))
+    } else if (earlier !== undefined) {
+      errors.push(
+        invalid(
+          child(loc, 'id'),
+          `step id \`${step.id}\` differs from \`${earlier}\` only in case; step ids name directories, which some filesystems treat as the same`,
+        ),
+      )
     }
     if (step.kind === 'agent') {
       const sources: Array<{ file: string; loc: Loc }> = [
@@ -239,6 +259,7 @@ export async function validateChain(chain: UnvalidatedChain): Promise<ResolvedCh
       }
     }
     if (!seen.has(step.id)) seen.set(step.id, step.kind)
+    if (earlier === undefined) folded.set(step.id.toLowerCase(), step.id)
   }
 
   const [first, ...rest] = errors

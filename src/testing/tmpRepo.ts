@@ -9,8 +9,21 @@ const execFileAsync = promisify(execFile)
 export interface TmpDir {
   /** Real path (symlinks resolved), as `git rev-parse --show-toplevel` prints it. */
   dir: string
-  /** Removes the directory and everything in it. */
+  /** Removes the directory and everything in it, unless `KEEP_TMP=1`. */
   cleanup: () => Promise<void>
+}
+
+/**
+ * With `KEEP_TMP=1` the directory is left in place and its path printed,
+ * so a test's output can be inspected by eye.
+ */
+function remover(dir: string): () => Promise<void> {
+  if (process.env.KEEP_TMP === '1') {
+    return async () => {
+      process.stderr.write(`KEEP_TMP: kept ${dir}\n`)
+    }
+  }
+  return () => rm(dir, { recursive: true, force: true })
 }
 
 export type TmpRepo = TmpDir
@@ -44,7 +57,7 @@ export async function tmpRepo(): Promise<TmpRepo> {
   // realpath: on macOS os.tmpdir() is under /var, a symlink to /private/var,
   // and git reports the resolved path.
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'rensa-repo-')))
-  const cleanup = () => rm(dir, { recursive: true, force: true })
+  const cleanup = remover(dir)
   try {
     await git(dir, ['init', '--quiet', '--initial-branch=main'])
     await git(dir, ['config', 'user.name', 'Rensa Test'])
@@ -63,5 +76,5 @@ export async function tmpRepo(): Promise<TmpRepo> {
 /** A temp directory that is not inside any git repository. */
 export async function tmpDir(prefix = 'rensa-dir-'): Promise<TmpDir> {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), prefix)))
-  return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  return { dir, cleanup: remover(dir) }
 }
