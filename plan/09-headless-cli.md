@@ -41,12 +41,13 @@ stderr, exit 64.
    `handle.done`.
 5. Exit 0 on `complete`, 1 on `failed` or `aborted`.
 6. `SIGINT` (ctrl+c): first press calls `handle.abort()`; second press
-   within 2 s exits immediately with 130. Install this listener before
-   `engine.start()`: step 06's shutdown module stands down on `SIGINT`
-   whenever another listener is registered, and with none it would exit
-   130 on the first press. The `process.exit(130)` on the second press
-   runs the shutdown callbacks (kill children, release lock) through
-   `'exit'`; do not duplicate that cleanup here.
+   within 2 s exits immediately with 130. Register this through step
+   06's `onInterrupt` (from the engine index), before `engine.start()`;
+   never `process.on('SIGINT')`, which would be a second listener and
+   is what step 06 exists to avoid. Until the handler is registered the
+   default applies and the first press exits 130. The `process.exit(130)`
+   on the second press runs the shutdown callbacks (kill children,
+   release lock) through `'exit'`; do not duplicate that cleanup here.
 
 ## Output format (stdout)
 

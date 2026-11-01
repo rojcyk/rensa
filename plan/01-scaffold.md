@@ -148,3 +148,26 @@ test` runs something.
 ## Out of scope
 
 Any engine logic, any Ink screen, README content.
+
+## Note 2026-10-31
+
+Dependency changes decided after this step shipped; apply them as a
+small follow-up change, not a rewrite of the step:
+
+- Pin `ink@8.0.0` and `react@19.3.x` exactly (Ink 8 requires React
+  19.3+). `package.json` already carries these.
+- Remove `ink-spinner` and `ink-text-input` from the dependency list
+  and from `package.json`. Both predate Ink 8 (May 2024) and are not
+  used: step 11 builds `Spinner` on Ink's `useAnimation` and `InputBox`
+  on `useInput` + `usePaste` + `useCursor`. _Done 2026-11-01: removed
+  from `package.json` and the lockfile; `ink-testing-library@4.0.0`
+  added as an exact dev dependency; `npm run check` passes._
+- `ink-testing-library@4.0.0` must be smoke-tested against Ink 8 before
+  any step relies on it. Add `src/tui/smoke.test.tsx` rendering
+  `<Text>hi</Text>` through it and asserting `lastFrame() === 'hi'`. If
+  it fails under Ink 8, remove the library, add
+  `src/testing/inkFrames.ts` (a helper that renders with Ink's own
+  `render()` into a `Writable` that collects frames and exposes
+  `lastFrame()` and `frames`), and record the choice here as a dated
+  line. Steps 11–14 say "render" and work with either.
+- Record of the choice: _(pending)_

@@ -65,10 +65,13 @@ chain (broken chains open a detail screen that shows only the error);
 src/tui/screens/Chains.tsx
 src/tui/components/ProviderLine.tsx
 src/tui/components/ChainRow.tsx
-src/tui/screens/Chains.test.tsx   ink-testing-library snapshots
+src/tui/screens/Chains.test.tsx   frame snapshots
 ```
 
-Add `ink-testing-library` as a dev dependency.
+No new dependencies. Snapshot tests render through whichever frame
+helper step 01's note settled on: `ink-testing-library` if its smoke
+test passed under Ink 8, else the `Writable` frame collector recorded
+there (step 11 uses the same one).
 
 ## Tests
 

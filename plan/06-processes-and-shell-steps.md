@@ -29,6 +29,8 @@ src/engine/process/*.test.ts     one per module, next to it
 ```ts
 export function onShutdown(fn: () => void): () => void   // returns unregister
 export function runShutdown(): void                      // idempotent; the handlers call it
+export function onInterrupt(fn: () => void): () => void  // replaces the default SIGINT behaviour; returns unregister
+export function resetShutdownForTests(): void            // clears callbacks, the once-only guard and the interrupt handler; tests only
 ```
 
 One registry of synchronous callbacks, run once in LIFO order (last
@@ -41,19 +43,42 @@ terminal unusable; if the TUI (step 11), the lock (step 08) and the
 child kill (below) each registered their own `exit` handler, their
 order would be accidental and a throw in one would skip the rest.
 
-- Handlers, installed once at module load:
+- Handlers, installed once at module load and kept for the life of
+  the process:
   - `process.on('exit')` → `runShutdown()`. Covers every normal exit
     and every `process.exit()` call.
   - `SIGTERM` → `runShutdown()`, then `process.exit(143)`.
-  - `SIGINT` → if this module is the only `SIGINT` listener,
-    `runShutdown()` then `process.exit(130)`; otherwise do nothing and
-    let the other listener decide (step 09's headless CLI aborts the
-    run on the first ctrl+c; the TUI runs stdin in raw mode, so ctrl+c
-    never becomes a signal there). Whatever that listener does, its
-    eventual exit still runs the callbacks through `'exit'`.
+  - `SIGHUP` (the terminal closed) → `runShutdown()`, then
+    `process.exit(129)`.
+  - `SIGINT` → call the handler registered through `onInterrupt` if
+    there is one; with none, `runShutdown()` then `process.exit(130)`.
+    Step 09's headless CLI registers abort-on-first-press,
+    exit-on-second. The TUI registers nothing: its stdin is in raw
+    mode, so ctrl+c arrives as a key and never becomes a signal, and
+    an external `SIGINT` falls through to the default, which restores
+    the terminal through the registry.
   - `uncaughtException` → `runShutdown()`, write the error's stack to
     stderr, `process.exit(1)`. Restoring the terminal before printing
     is the point: the stack has to be readable.
+- Every signal path ends in `process.exit()`, never in dying by the
+  signal: a process killed by a signal does not emit `'exit'`, so the
+  callbacks would not run. These listeners are unconditional. Nothing
+  in the codebase counts or inspects signal listeners, here or in a
+  consumer. Why: Ink registers its unmount through `signal-exit`, which
+  installs its own listener on every one of these signals at
+  `render()` and acts only when it is the sole listener. A listener of
+  ours that also stood down "when another listener exists" would
+  deadlock with it: both defer, nobody exits, and an external `SIGINT`
+  to the TUI is swallowed. With our listener always present,
+  `signal-exit` always stands down and our `process.exit()` reaches
+  Ink's unmount through `'exit'`, after our callbacks (Node runs
+  `'exit'` listeners in registration order and ours is registered at
+  engine module load, before `render()`). Signals this module does not
+  listen to are left to Node's default; do not add more to chase
+  `signal-exit`'s list.
+- `onInterrupt` holds at most one handler; a second registration
+  replaces the first and the returned function restores the default
+  only if its own handler is still current.
 - `runShutdown()`: guarded by a module flag so the callbacks run at
   most once even when a signal handler and `'exit'` both fire. Each
   callback runs in a `try`; a throw is written to stderr and the next
@@ -68,10 +93,12 @@ Engine modules register at module evaluation, not lazily: `spawn.ts`
 registers the child kill below and step 08's `lock.ts` registers the
 lock release, both at top level. `src/engine/index.ts` imports
 `process/spawn.js` before `run/lock.js` so the kill callback is
-registered first. The TUI registers its terminal restore from
-`main.ts`, after the engine has been imported, so it is always the
-last registration. LIFO then yields: terminal restore, kill live
-children, release lock.
+registered first, and re-exports `onShutdown` and `onInterrupt` so
+consumers never import from `process/` directly. The TUI registers
+its terminal restore in `startSession` (`src/tui/terminalSession.ts`,
+step 11), which `main.ts` calls after the engine has been imported and
+opened, so it is always the last registration. LIFO then yields:
+terminal restore, kill live children, release lock.
 
 ## env.ts
 
@@ -160,9 +187,19 @@ export async function runShellStep(opts: {
 - `shutdown`: three callbacks run in LIFO order; a second
   `runShutdown()` runs nothing; an unregistered callback does not run;
   a callback that throws does not stop the ones after it. Test
-  `runShutdown()` directly; do not kill the test process. Confirm the
-  signal handlers exist with `process.listenerCount('SIGTERM')` and
-  `process.listenerCount('SIGINT')` after import.
+  `runShutdown()` directly; do not kill the test process.
+- `shutdown` signals: export the three listener functions
+  (`handleInterrupt`, `handleTerminate`, `handleHangup`) and call them
+  directly with `process.exit` replaced by `vi.spyOn(...).mockImplementation`;
+  never send a real signal or emit one on `process`, where vitest's own
+  listeners would also fire. The default interrupt runs the callbacks
+  and exits 130; a handler registered through `onInterrupt` runs
+  instead and the callbacks do not; after its unregister function the
+  default is back; `handleTerminate` exits 143 and `handleHangup` 129,
+  both after the callbacks. These share a file with the `runShutdown`
+  tests; `resetShutdownForTests()` in `beforeEach` clears the once-only
+  guard, the callbacks and the interrupt handler so each case starts
+  clean. Production code never calls it.
 - `lineReader` with chunks split mid-line and mid-multibyte-character.
 - `spawnProcess`: `printf 'a\nb'` yields two lines including the
   unterminated one; a `sleep 10` with 200 ms timeout reports

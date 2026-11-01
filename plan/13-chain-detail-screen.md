@@ -13,6 +13,14 @@ this step, starting a run navigates to a placeholder run screen that
 shows the run id and `complete`/`failed` when `handle.done` resolves.
 Step 14 replaces that placeholder.
 
+The screen is laid out through step 11's `Layout`: header slot
+`Header`; body the frame, the timeline and the status line; footer the
+input area. Sizes come from `SizeContext` (bounds immediately; nothing
+here wraps, so the settled width is unused). Painting follows step 14's
+rule D: no root background in inline mode, `theme.background` on the
+fullscreen root from step 11, explicit background only on the focused
+input box, borders styled deliberately.
+
 ## Layout
 
 ```
@@ -49,7 +57,8 @@ Step 14 replaces that placeholder.
   description in `muted`. A chain that failed to load shows the error
   in `err` instead of the description and nothing below the frame
   except `esc back`.
-- Timeline: one row per step. Marker `○` in `dim`. Step id in `text`.
+- Timeline: wrapped in `Ratchet` (below), one row per step. Marker
+  `○` in `dim`. Step id in `text`.
   Shell steps show the command on the same row in `muted`. Agent steps
   show one row beneath, indented to the id column: label in `muted`,
   then `provider · model · effort` in `muted` where `model` prints as
@@ -65,12 +74,29 @@ Step 14 replaces that placeholder.
     in `err`
   - `! another run is active: <run id>` in `err`
 - Input area, by `chain.input`:
-  - `text`: a framed `ink-text-input` with `›` prompt. Enter with text
+  - `text`: step 11's `InputBox` (`useInput` + `usePaste` +
+    `useCursor`; no `ink-text-input`) with `›` prompt. Enter with text
     starts; Enter empty does nothing.
   - `file`: same box, placeholder `path to file`, value is a path
     relative to the repo root; Enter starts if the file exists, else the
     status line shows `! file not found: <path>` in `err`.
   - `none`: no box; the line `press enter to start` in `muted`.
+
+## Ratchet
+
+```ts
+export const Ratchet: React.FC<{ children: React.ReactNode }>   // src/tui/components/Ratchet.tsx
+```
+
+A `Box` whose `minHeight` only grows: it measures its rendered height
+with Ink 8's `useBoxMetrics` and keeps the largest value seen as
+`minHeight`, so content that shrinks for a frame (a launch-check line
+disappearing while `git status` re-runs, an agent row's second line
+going away) does not pull everything below it up and back down. The
+ratchet resets when `SizeContext` bounds change, since a different
+terminal size legitimately needs a different height. Used here around
+the timeline block, and in step 14 around the right-column header
+block. No background of its own.
 
 ## Launch checks
 
@@ -102,11 +128,14 @@ the status line.
 ```
 src/tui/screens/Detail.tsx
 src/tui/components/Timeline.tsx        shared with step 14: props { steps, mode: 'static' | 'live', selected? }
-src/tui/components/InputBox.tsx
+src/tui/components/Ratchet.tsx         grow-only minHeight via useBoxMetrics; reset on bounds change
 src/engine/engine.ts                   add preflight()
 src/tui/screens/Detail.test.tsx
+src/tui/components/Ratchet.test.tsx
 src/engine/engine.preflight.test.ts    integration, as in step 08
 ```
+
+`InputBox` comes from step 11; this step adds no input component.
 
 ## Tests
 
@@ -115,6 +144,16 @@ src/engine/engine.preflight.test.ts    integration, as in step 08
 - Preflight: clean tree ok; dirty tree message; missing provider
   message with hint; lock message.
 - Enter with an empty text input does not call `start`.
+- `Ratchet`: children of height 5 then 3 keep the box at 5; 3 then 7
+  grows to 7; a bounds change resets so 7 then 3 after a resize is 3.
+- Layout: at 100×30 the footer input box is on the last rows and the
+  timeline is clipped, not overflowing, when the chain has more steps
+  than rows allow; in `narrow` compact mode (50 columns) the detail
+  text truncates with `…`.
+- Painting, color-aware: the focused input box carries
+  `theme.selection` on its interior cells and its border background
+  matches the root in fullscreen; nothing else in the frame carries a
+  background in inline mode.
 
 ## Verification (human)
 

@@ -10,7 +10,11 @@ end states. This completes the TUI MVP (dogfooding milestone 2).
 ## Context
 
 Steps 01–13 merged. All data comes from `RunView` (step 11) and the
-transcript ring buffers; the screen computes nothing beyond layout.
+engine-owned transcript ring buffers (`handle.transcript`, step 11);
+the screen computes nothing beyond layout. The screen is laid out
+through step 11's `Layout` (header slot: `Header` and the status line;
+body: the two columns; footer: the note box) and sized from
+`SizeContext`: bounds immediately, wrap width when it settles.
 
 ### Notes from step 05
 
@@ -57,9 +61,12 @@ failed or aborted.
 
 ### Left column
 
-Width = longest step id + 6. One row per step: marker, id, and a
-follow indicator `⟳` after the id of the running step when the
-selection is detached.
+Width is the `leftCols` budget from step 11's `layoutBudget`
+(`min(longest id + 6, 35 % of columns)`), clipped; an id wider than
+that truncates with `…`. One row per step: marker, id, and a follow
+indicator `⟳` after the id of the running step when the selection is
+detached. In `narrow` compact mode the column is absent and a one-line
+strip `step 3/6 implement` sits above the right column instead.
 
 Markers: `○` pending (`dim`), `●` running (`accent`), `✓` ok (`ok`),
 `✗` failed, killed, timeout (`err`), `‖` paused-before (`warn`). The
@@ -69,6 +76,12 @@ selected row's id is in `accent`; the running row's marker is always
 A vertical `│` in `dim` separates the columns, full height of the body.
 
 ### Right column
+
+Items 1–4 form the header block and are wrapped in `Ratchet` (step
+13): a grow-only `minHeight` measured with `useBoxMetrics` and reset on
+a bounds change, so an agent row's error line appearing or the config
+cell wrapping on a narrow terminal never makes the transcript below
+jump up and down between frames.
 
 1. Step id in `text`.
 2. Rule in `faint`.
@@ -94,70 +107,152 @@ A vertical `│` in `dim` separates the columns, full height of the body.
 4. Rule in `faint`.
 5. Transcript area: the rest of the body height.
 
-### Transcript rendering
+### Transcript viewport (rule C)
 
-Source: `view.transcript(step, label)` records plus the current partial
-line. The pane is virtualized: it mounts only what intersects the
-viewport, so frame cost stays flat however long the transcript gets.
+Source: `view.transcript(step, label)` (the engine-owned ring buffer)
+plus `view.partial(step, label)`. The pane mounts only the visible rows
+and does so through a pure model that owns all measurement.
+
+#### The model: `src/tui/viewport.ts`, no React
 
 ```ts
-interface TranscriptProps {
-  buffer: RingBuffer<TranscriptRecord>      // step 11; absolute record indices
-  partial?: string                          // the current streaming line, rendered after the last record
-  version: number                           // s.transcriptVersions.get(key); re-measures only indices ≥ last measured
-  scrollOffset: number                      // first visible wrapped line, counted from the top of the transcript
-  height: number                            // rows available to the pane; from step 11's useTerminalSize
-  width: number                             // column width; changes invalidate the wrap cache; debounced with it
-  expanded: ReadonlySet<number>             // record indices shown expanded (tool records)
-  cursor?: number                           // record index under the cursor
+export class TranscriptViewport {
+  constructor(buffer: RingBuffer<TranscriptRecord>, opts: { width: number; capacity: number })
+  // inputs
+  sync(): void                                   // ingest records appended to / evicted from the buffer since last sync
+  setPartial(text: string | undefined): void     // the mutable streaming tail
+  setWidth(width: number): void                  // settled width only (step 11 SizeContext.settledColumns)
+  setExpanded(record: number, expanded: boolean): void
+  // navigation
+  scrollBy(lines: number): void; scrollTo(edge: 'top' | 'bottom'): void
+  follow(): void; detach(): void; readonly following: boolean
+  readonly anchor: { record: number; offset: number }   // logical: record id + grapheme offset into its text
+  // output
+  visible(height: number): VisibleRow[]          // rows intersecting the window, each with its visible line slice
+  totalLines(): number
+  readonly stats: { wraps: number; measured: number; lookups: number }   // operation counters for tests
 }
+interface VisibleRow { record: number; kind: TranscriptRecord['kind'] | 'partial'; lines: string[]; firstLine: number; expanded: boolean }
 ```
 
-- Measure in wrapped lines, not records. A wrap cache maps absolute
-  record index to that record's wrapped lines for the current `width`
-  (and, for a tool record, its expanded state); the record's height is
-  the array length. A prefix sum over heights maps `scrollOffset` to
-  the first intersecting record and the line offset inside it, and the
-  pane walks forward until `height` lines are filled. Records are
-  immutable once in the buffer, so an entry is computed once; the whole
-  cache is dropped when `width` changes, one entry when its record is
-  expanded or collapsed. The partial line is wrapped on every version
-  bump and never cached.
-- Exactly the intersecting records are mounted, each as a
-  `React.memo` row keyed by absolute index and given only the slice of
-  its wrapped lines that falls inside the window. A row's props change
-  only when it enters or leaves the window edge, is toggled, or becomes
-  the cursor; a version bump on the key re-renders the pane, which
-  measures the new records and re-renders the one or two rows at the
-  bottom edge, nothing above them.
-- `scrollOffset` is state of `Run.tsx`, per selected step; the total
-  wrapped height is the last prefix sum plus the partial line's height.
-  Following means `scrollOffset = max(0, total − height)` recomputed on
-  each version bump; detaching freezes it.
-- The pane never uses Ink's `<Static>`. `<Static>` appends to terminal
-  scrollback and is for output that will never move again, which
-  conflicts with a pane that scrolls in place; memoized virtual rows do
-  the same work inside the inline frame, which is the rendering mode
-  step 11 decided on.
+- **Cache key** is transcript identity (the buffer instance), absolute
+  record index, width, and presentation state (tool expansion).
+  Records are immutable once in the buffer, so an entry is computed
+  once per (width, expansion) and reused until evicted.
+- **Indexed heights, never a rebuilt prefix sum.** Wrapped heights
+  live in an order-statistics structure (a Fenwick tree over the ring's
+  `capacity` slots, slot = index mod capacity, with the live range
+  `[start, length)` queried as at most two slot ranges). Append sets
+  one slot, eviction clears one slot, expansion updates one slot;
+  prefix-line counts and line→record lookups are `O(log capacity)`.
+  No frame rebuilds an array over all records.
+- **Eviction follows the buffer.** `sync()` compares `buffer.start`
+  with the last seen start and drops cache entries and tree slots for
+  evicted indices, so memory is bounded by `capacity` regardless of
+  run length.
+- **Logical anchor.** The viewport's position is `{ record, offset }`,
+  the record the top visible line belongs to and the grapheme offset
+  into that record's normalized text where the line begins, not a bare
+  line number. A width change, an expansion above, or an eviction
+  re-derives the top line from the anchor, so the user keeps reading
+  what they were reading. If the anchor's record is evicted, clamp to
+  the earliest retained record. `scrollBy` moves the anchor by wrapped
+  lines through the tree.
+- **Follow mode is explicit.** `following` starts true; `visible()`
+  then anchors to the bottom on every call. Any manual scroll
+  (`scrollBy`, `scrollTo('top')`) detaches; `follow()` (ctrl+f) and
+  `scrollTo('bottom')` reattach.
+- **Streaming tail.** `setPartial` splits the tail on `\n`: completed
+  logical lines are wrapped once and retained in a tail cache; only the
+  last, still-growing logical line is rewrapped, once per published UI
+  update (one version bump), never per delta. Soft-wrapped lines inside
+  that last logical line are never frozen, since later characters can
+  change both word-wrap points and grapheme boundaries (a combining
+  mark or a variation selector arriving after its base). A newline-free
+  reply therefore rewraps one long logical line per update, which is
+  linear in its length; that case is tested separately and must stay
+  correct and bounded per update.
+- **One normalization and width policy** for measuring and displaying:
+  `normalize(text)` expands tabs to 8-column stops, drops `\r`, keeps
+  blank lines and trailing newlines as empty rows, and strips nothing
+  else; wrapping is `wrap-ansi` (hard-wrap long words, `trim: false`)
+  and measurement is `string-width`, both declared as **direct
+  dependencies** in this step, never reached through Ink's
+  `node_modules`; grapheme offsets come from `Intl.Segmenter`. The
+  `Transcript` component renders the lines the model produced with
+  `<Text wrap="truncate">`, so what was measured is what is shown.
 
-- `text`: wrapped to the column width, `text` color. The partial line
-  renders in `muted` until finalized.
-- `tool`: one line `▸ <name> <summary>` in `muted`, where summary is
-  the first string field of `input` truncated to fit. Expanded state
-  (toggle with `enter` when the cursor is on it) shows `input` as
-  pretty JSON and `output` beneath, indented, in `dim`.
-- `note`: `» <text>` in `warn`.
-- Shell steps: the same component; records arrive as text lines.
-- Pending step: nothing below the rules except `not started` in `dim`.
-- Failed agent with an error: the error message rendered last in `err`,
-  followed by `(transcript: <agent dir>)` in `dim`.
-- Scrolling: `pageUp`/`pageDown` move `scrollOffset` by half the pane
-  height in wrapped lines; `top`/`bottom` jump to 0 and to
-  `total − height`. While following, the window sticks to the bottom;
-  any manual scroll detaches the window until `bottom`.
-- Finished steps need nothing special: their records are already
-  cached and their rows memoized, so a finished transcript costs one
-  prefix-sum lookup per frame and no re-wrapping.
+#### The component: `Transcript.tsx`
+
+```ts
+interface TranscriptProps { view: RunView; step: string; label: string; height: number; width: number; expanded: ReadonlySet<number>; cursor?: number }
+```
+
+- Holds one `TranscriptViewport` per `(step, label)` in a ref;
+  subscribes to `s.transcriptVersions.get(key)` and calls `sync()` and
+  `setPartial()` on each bump; calls `setWidth()` only when
+  `settledColumns` changes.
+- Mounts exactly `visible(height)`: one `React.memo` row per
+  `VisibleRow`, keyed by record index, given its line slice. A row's
+  props change only when its slice, expansion or cursor state changes.
+- The pane `Box` has `overflow="hidden"` as edge safety for a
+  partially visible last row and for the un-settled width transition
+  (step 11); it is not how scrolling works. Scrolling is the model's
+  anchor, not Ink's `contentOffsetY`.
+- Record kinds: `text` in `text` color, the partial tail in `muted`;
+  `tool` as one line `▸ <name> <summary>` in `muted` (summary: first
+  string field of `input`, truncated) and, expanded, `input` as pretty
+  JSON and `output` beneath, indented, in `dim`; `note` as `» <text>`
+  in `warn`. Shell steps use the same component with text records.
+  Pending step: `not started` in `dim`. Failed agent: the error message
+  last in `err`, then `(transcript: <agent dir>)` in `dim`; both are
+  model rows too, so they scroll with the rest.
+- Keys: `pageUp`/`pageDown` → `scrollBy(∓ floor(height / 2))`;
+  `top`/`bottom` → `scrollTo`; `follow` → `follow()`.
+
+#### Performance contract
+
+Verified by the model's operation counters, with timings as supporting
+evidence only (timings are not assertions):
+
+- After the cache is warm, a scroll is an indexed lookup plus work
+  proportional to the visible rows: `wraps` stays 0, `lookups` grows
+  by `O(log capacity)`.
+- An append processes the new content only: `wraps` grows by the
+  number of new records (plus one tail rewrap per update).
+- A width change may rewrap retained history (`wraps` up to the
+  retained record count) and nothing else triggers that.
+- The frame mounts at most `height` rows regardless of buffer length.
+
+### Painting (rule D)
+
+Applies to every screen from step 11 on; this step is where it is
+exercised fully.
+
+- `theme.background` is set on the fullscreen root `Box` (step 11
+  `app.tsx`) and nowhere else. Ink fills interior gaps and empty body
+  space from it: an empty transcript, the space under a short step
+  list, the gap between columns. In inline mode there is no root
+  background; the terminal's own shows through.
+- Explicit backgrounds only on selected rows or panels: the selected
+  step row and the focused note box use `theme.selection`; nothing else
+  paints.
+- Borders are styled deliberately, since `backgroundColor` fills the
+  interior and excludes them: `Frame` and the note box set their border
+  color (`dim`, `accent` when focused) and, in fullscreen, their border
+  background to `theme.background` so the border cells match the fill.
+- A small `Row` component exists only where one-row sizing,
+  truncation, or selection styling is needed (step rows, agent rows,
+  the strip in narrow mode): `height={1}`, `overflow="hidden"`,
+  `<Text wrap="truncate">`, optional `backgroundColor`. Plain `Box` and
+  `Text` everywhere else.
+- Tests must be color-aware: assert on the ANSI sequences in the frame
+  (background on every cell of a selected row, background present in
+  empty pane cells in fullscreen, absent in inline), and cover empty
+  panes, gaps, shorter replacement text (a long status replaced by a
+  short one leaves no stale cells), selection changes, and resizing.
+  Plain-text snapshots cannot prove background coverage and are not
+  accepted for these cases.
 
 ### Keys
 
@@ -188,16 +283,16 @@ engine writes.
 ### End states
 
 Header state word and color change; spinners unmount and every
-`Elapsed` gets its `until`, so no interval is left running; the last step stays
-selected unless the user moved; the note box goes inert. Nothing else
-changes.
+`Elapsed` gets its `until`, so no interval is left running; the last
+step stays selected unless the user moved; the note box goes inert.
+Nothing else changes.
 
 ### Finished run from disk
 
 `Run.tsx` takes either a live `RunHandle` or a `RunDir`; in the second
 case `RunView` is built once from `readEvents` through step 08's
-`reduceSteps(events, chain.steps)` and `reduceRun(events)`, with the
-ring buffers filled from `readTranscript`.
+`reduceSteps(events, chain.steps)` and `reduceRun(events)`, with
+`RingBuffer`s (the engine's class) filled from `readTranscript`.
 No entry point in the MVP opens it that way (history screen deferred),
 but the component must support it so the deferred feature is a
 navigation change, not a rewrite. Test it.
@@ -206,20 +301,21 @@ navigation change, not a rewrite. Test it.
 
 ```
 src/tui/screens/Run.tsx
+src/tui/viewport.ts                   pure model: cache, Fenwick heights, anchor, follow, tail (rule C)
 src/tui/components/StepList.tsx
 src/tui/components/AgentRows.tsx
-src/tui/components/Transcript.tsx     virtualized pane: wrap cache, prefix sum, memoized rows
+src/tui/components/Transcript.tsx     mounts visible(height) rows only
 src/tui/components/StatusLine.tsx
-src/tui/format.ts                 elapsed, tokens, truncation and `wrapLines(text, width)` helpers
+src/tui/components/Row.tsx            one-row sizing, truncation, selection background (rule D)
+src/tui/format.ts                     add tokens and truncation helpers (elapsed exists from step 11)
+src/tui/viewport.test.ts
 src/tui/screens/Run.test.tsx
 src/tui/components/Transcript.test.tsx
 src/tui/format.test.ts
 ```
 
-`wrapLines` word-wraps on display width (`string-width`, already a
-dependency of Ink) and is the one wrapping routine the pane uses, so
-the measured height and the rendered height can never disagree. Ink's
-own `wrap` is not used inside the pane for the same reason.
+Add `wrap-ansi` and `string-width` as direct runtime dependencies,
+pinned exactly (index.md "Pinned versions").
 
 ## Tests
 
@@ -230,14 +326,39 @@ own `wrap` is not used inside the pane for the same reason.
   advancing fake timers by 5 s re-renders the leaves but not the row;
   a transcript record on the same step does not re-render the row
   either.
-- Transcript virtualization: a buffer of 5000 single-line records at
-  `height` 20 renders a frame of exactly 20 lines and mounts at most 20
-  rows (count with a probe on the row component); a `pageDown`
-  re-renders only the rows that entered the window; pushing one record
-  while following re-renders the pane and the bottom-edge row, not the
-  rows above; changing `width` re-wraps a long record to the new line
-  count; toggling a tool record changes only that record's height in
-  the prefix sum.
+- `viewport` (pure, no React): normalization and width policy over
+  CJK, combining marks, emoji sequences (ZWJ, flags, skin tones), tabs
+  at 8-column stops, blank lines, trailing newlines, words longer than
+  the width, and tool expansion, each asserting the wrapped lines and
+  `totalLines()`; anchor preserved across a width change (the same
+  grapheme stays on the top line), across expansion of a record above,
+  and across eviction (clamps to `buffer.start`); follow detaches on
+  `scrollBy` and reattaches on `follow()` and `scrollTo('bottom')`;
+  streaming tail: 200 deltas building three logical lines rewrap only
+  the last line per `setPartial`, counted via `stats.wraps`; a
+  newline-free 100 KB tail stays correct across 50 updates (separate
+  test); eviction drops cache entries and tree slots so the model's
+  retained-entry count never exceeds `capacity`.
+- Performance contract (operation counts): warm cache, `scrollBy`
+  ×100 → `stats.wraps` unchanged and `lookups` ≤ 100 × (⌈log₂ capacity⌉
+  + 2); append 50 records → `wraps` += 50 (+ tail); `setWidth` →
+  `wraps` ≤ retained records; `visible(20)` on a 5000-record buffer
+  returns ≤ 20 rows. Record wall-clock in the test output as evidence
+  only; never assert on it.
+- `Transcript` (render): a 5000-record buffer at `height` 20 mounts at
+  most 20 rows (probe on the row component); a `pageDown` re-renders
+  only rows that entered; one appended record while following
+  re-renders the pane and the bottom-edge row, not the rows above; a
+  `settledColumns` change rewraps, a bounds-only change does not (rows
+  are truncated, not re-wrapped, until it settles).
+- Painting, color-aware: in fullscreen the selected step row carries
+  the selection background on every cell to the column's edge; empty
+  transcript cells carry the root background; the gap column between
+  the step list and the transcript carries it; replacing
+  `paused before implement` by `running` leaves no stale cells; moving
+  the selection moves the background; after a resize the new empty
+  area is filled. In inline mode no background sequence appears except
+  on the selected row.
 - Keys: `right` selects the next step and detaches; `ctrl+f`
   reattaches; `pageDown` moves the window; `enter` on a tool line
   toggles expansion.
