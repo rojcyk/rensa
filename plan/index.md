@@ -12,9 +12,9 @@ separate) is enforced by a lint rule from step 01 onward.
 
 - [x] [01 Scaffold](01-scaffold.md) — package, tooling, directory layout, import boundary lint, `rensa --version`.
 - [x] [02 Config discovery](02-config-discovery.md) — locate `.rensa/`, user config dir, chain files, project files; write `.gitignore`.
-- [ ] [03 Chain loading](03-chain-loading.md) — parse YAML, resolve agents across levels, expand `from:`, derive labels, validate, structured errors.
-- [ ] [04 Templates and variables](04-templates-and-vars.md) — `{{name}}` rendering, namespace, `vars` evaluation, output-map rendering, user notes.
-- [ ] [05 Run storage](05-run-storage.md) — run id, run directory, `run.json`, `events.jsonl` single writer and reader, transcript writer.
+- [x] [03 Chain loading](03-chain-loading.md) — parse YAML, resolve agents across levels, expand `from:`, derive labels, validate, structured errors.
+- [x] [04 Templates and variables](04-templates-and-vars.md) — `{{name}}` rendering, namespace, `vars` evaluation, output-map rendering, user notes.
+- [x] [05 Run storage](05-run-storage.md) — run id, run directory, `run.json`, `events.jsonl` single writer and reader, transcript writer.
 - [ ] [06 Processes and shell steps](06-processes-and-shell-steps.md) — spawn in a process group, kill, timeout, line readers, env stripping, shell step executor, ordered synchronous shutdown hook.
 - [ ] [07 Adapter interface and fake provider](07-adapter-interface-and-fake.md) — adapter contract, normalized agent events, fixture format, fake adapter that replays fixtures.
 - [ ] [08 Engine](08-engine.md) — orchestrator: locks, availability check, sequential steps, pauses, user commands, event emission.
