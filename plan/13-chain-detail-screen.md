@@ -74,9 +74,10 @@ input box, borders styled deliberately.
     in `err`
   - `! another run is active: <run id>` in `err`
 - Input area, by `chain.input`:
-  - `text`: step 11's `InputBox` (`useInput` + `usePaste` +
-    `useCursor`; no `ink-text-input`) with `›` prompt. Enter with text
-    starts; Enter empty does nothing.
+  - `text`: step 11's controlled `InputBox` with `›` prompt; the screen
+    owns its `InputState` and starts with `focus: 'input'`, since there
+    is nothing else to navigate here. Enter with text starts, once,
+    through the `input`-focus submit path; Enter empty does nothing.
   - `file`: same box, placeholder `path to file`, value is a path
     relative to the repo root; Enter starts if the file exists, else the
     status line shows `! file not found: <path>` in `err`.
@@ -114,8 +115,13 @@ when `ok` is false.
 
 ## Keys
 
-`enter` start (when the checks pass and the input rule is satisfied);
-`esc` back to chains; typing goes to the input box when present.
+Routed by step 11's focus model with one `useKeys`. With an input box
+(`text`, `file`) focus is `input` from mount: `enter` starts when the
+checks pass and the input rule is satisfied, text and arrows go to
+`editInput`, `esc` goes back to chains (there is no `main` to return
+to on this screen, so `esc` in `input` leaves). With `input: none`
+focus is `main` and `enter` starts. `start` is called from exactly one
+code path.
 
 ## Starting
 
@@ -143,7 +149,10 @@ src/engine/engine.preflight.test.ts    integration, as in step 08
 - `input: none` renders `press enter to start`; `text` renders the box.
 - Preflight: clean tree ok; dirty tree message; missing provider
   message with hint; lock message.
-- Enter with an empty text input does not call `start`.
+- Enter with an empty text input does not call `start`; Enter with
+  text calls `start` exactly once (a second call would start a second
+  read-only run); `left`/`right` while typing move the caret and
+  nothing else.
 - `Ratchet`: children of height 5 then 3 keep the box at 5; 3 then 7
   grows to 7; a bounds change resets so 7 then 3 after a resize is 3.
 - Layout: at 100×30 the footer input box is on the last rows and the

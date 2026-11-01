@@ -19,7 +19,7 @@ separate) is enforced by a lint rule from step 01 onward.
 - [ ] [07 Adapter interface and fake provider](07-adapter-interface-and-fake.md) — adapter contract, normalized agent events, fixture format, fake adapter that replays fixtures.
 - [ ] [08 Engine](08-engine.md) — orchestrator: locks, availability check, sequential steps, pauses, user commands, event emission.
 - [ ] [09 Headless CLI](09-headless-cli.md) — `rensa run`, `rensa doctor`, line output, exit codes.
-- [ ] [10 Claude adapter](10-claude-adapter.md) — Claude Code headless integration, stream parsing, session resume, skills staging, auth check, first fixture capture.
+- [ ] [10 Claude adapter](10-claude-adapter.md) — Claude Code headless integration, stream parsing, session resume, persona staging, auth check, first fixture capture.
 - [ ] [11 TUI foundation](11-tui-foundation.md) — Ink 8 terminal session (inline and fullscreen), sizing and layout, theme, header, key routing, store, engine bridge, engine-owned ring buffers, input box.
 - [ ] [11b Fullscreen measurement](11b-fullscreen-measurement.md) — human-executed after step 14: measure fullscreen with incremental rendering on three terminals, decide the default mode. Ticked after 14, not before.
 - [ ] [12 Chains screen](12-chains-screen.md) — provider line, chain list, annotations, recheck.
@@ -84,7 +84,8 @@ src/
     layout.ts            pure layoutBudget(), compact thresholds
     theme.ts
     store.ts             external store; setState skips notification on the same reference; useStore
-    batch.ts             coalesces engine events into one setState per 50 ms
+    frameRate.ts         MAX_FPS and FRAME_MS, the one place the frame rate is written
+    batch.ts             coalesces engine events into one setState per frame (FRAME_MS)
     engineBridge.ts
     viewport.ts          pure transcript viewport model (step 14)
     screens/             Chains.tsx, Detail.tsx, Run.tsx
@@ -142,7 +143,7 @@ type Tools = 'read' | 'write'
 interface AgentConfig {
   provider: Provider; model?: string; effort?: Effort; tools: Tools
   prompt?: string               // absolute path to persona file
-  skills: string[]              // absolute paths to skill directories
+  skills: string[]              // absolute paths to skill directories; inlined into the first prompt (step 08), never passed to adapters
 }
 
 interface ResolvedAgent extends AgentConfig {
@@ -192,17 +193,30 @@ class Engine extends EventEmitter {
 interface RunHandle {
   id: string; dir: string
   pause(): void; resume(): void; kill(): void; abort(): void; note(text: string): void
-  done: Promise<RunStatus>
+  done: Promise<RunResult>                                               // in-memory terminal state; never rejects
+  result(): RunResult | undefined                                        // set when the run ended, from the log or not
   transcript(step: string, label: string): RingBuffer<TranscriptRecord>   // step 11: engine-owned buffers
-  partial(step: string, label: string): string | undefined               // step 11
+  partial(step: string, label: string): string | undefined               // step 11: deltas since the key's last record
+  events(): ReadonlyArray<RunEvent>                                      // history so far, seq order
+  attach(l: RunListeners): { events: ReadonlyArray<RunEvent>; result?: RunResult; detach(): void }   // snapshot + subscribe, atomic
 }
-// Events: 'event' (RunEvent, one per events.jsonl line),
-//         'transcript' (step, label, TranscriptRecord, partial?: boolean),
-//         'providers' (ProviderStatus[], after every completed check)
+interface RunResult { status: RunStatus; failedStep?: string; finishedAt: string; error?: { code: string; message: string; hint?: string } }
+interface RunListeners {              // all per run, on the handle; the Engine emitter carries none of these
+  event?(e: RunEvent): void                                              // one per events.jsonl line
+  transcript?(m: { step; label; record: TranscriptRecord }): void        // after disk and ring buffer
+  delta?(m: { step; label; text: string }): void                        // after the partial slot; never on disk
+  finished?(r: RunResult): void                                          // once, even when run.finished could not be written
+}
+// Engine events: 'providers' (ProviderStatus[], after every completed check). Nothing else.
 
 // Process death (step 06, re-exported here):
 function onShutdown(fn: () => void): () => void    // synchronous callbacks, LIFO, run once on any exit
 function onInterrupt(fn: () => void): () => void   // replaces the default SIGINT behaviour (shutdown + exit 130)
+
+// Diagnostics (step 07): engine code never writes to stdout/stderr/console; frontends decide
+function diag(scope: string, message: string): void
+function onDiag(fn: (e: { t: string; scope: string; message: string }) => void): () => void
+function drainDiag(): ReadonlyArray<{ t: string; scope: string; message: string }>
 ```
 
 The shutdown module is the only place in the codebase that listens
@@ -251,6 +265,109 @@ this out).
   handled. Reason recorded in step 06: Ink's `signal-exit` also counts
   listeners, so two deferring heuristics swallow the signal. Step 06
   now names `startSession` as where the TUI registers its restore.
+- 2026-11-01, React crash path (review P1). Step 11's `Session.done`
+  is derived from `waitUntilExit()` observed right after `render`, not
+  from `quit()`: Ink's error boundary turns a render-phase throw into
+  a rejected exit promise that never reaches `uncaughtException`, so
+  `done` rejects, `main.ts` prints the stack and exits 1 through step
+  06's registry. PTY tests split the crash scenario into render and
+  timer variants.
+- 2026-11-01, terminal ownership (review P1, second item). Step 11's
+  record sets `alternateScreen` and `cursorHidden` before `render`,
+  since Ink enters both in its constructor, and the fatal callback
+  clears every flag once Ink's synchronous `unmount()` returns, so no
+  duplicate leave sequence is written. Unit tests cover a throw after
+  entry and a successful Ink teardown.
+- 2026-11-01, streaming events (review P1, third item). Step 07's
+  `AgentEvent` union (`delta` plus plain records) is the only
+  streaming vocabulary; the `partial` flag is gone from steps 08, 10,
+  15, 16 and the engine events. The engine emits `'transcript'` for
+  records and `'delta'` for fragments; a record clears its key's
+  partial slot. Shell output lines are completed `text` records under
+  label `shell`, so the headless CLI prints them.
+- 2026-11-01, run-scoped streams (review P1, fourth item). `start()`
+  emits `run.started` before returning, so no consumer could subscribe
+  in time, and a shared emitter with no run id would interleave two
+  live read-only runs. Run streams now live on `RunHandle`:
+  `events()` and an atomic `attach()` that returns the history and
+  subscribes in one synchronous call; the `Engine` emitter keeps only
+  `'providers'`. The headless CLI replays the history; `RunView` seeds
+  its store from it and is rebuilt from the handle on re-entry.
+- 2026-11-01, abort ordering (review P1, fifth item). Step 08's
+  runner gains an `aborting` state: `abort()` kills and returns, the
+  loop stops at its next boundary check, the current step drains to
+  its own finish events, and only then do `run.finished`, writer
+  close, `run.json`, lock release and `done` happen, in that order.
+  `RunProgress.status` gains `aborting`; the fake adapter gains
+  `RENSA_FAKE_KILL_DELAY_MS`; tests cover abort mid-step, while paused
+  and before the first spawn.
+- 2026-11-01, terminal result (review P1, sixth item). A run's end is
+  an in-memory `RunResult` on the handle, independent of persistence:
+  `done` resolves with it, `attach` returns it to late consumers and
+  delivers it through a `finished` listener, and step 08's
+  `applyResult` merges it into `RunProgress`. Storage failures take a
+  defined fatal path that always releases the lock and produces a
+  result with a `STORAGE` error; the headless CLI prints it and the run
+  screen shows `failed · <message>` instead of running forever.
+- 2026-11-01, process groups (review P1, seventh item). Step 06's
+  `kill()` escalates to SIGKILL on the group unconditionally after
+  `escalateMs`, the live-groups registry drops a pgid only once
+  `result` settled and `kill(-pgid, 0)` reports the group gone, and
+  `result` is bounded: pipes still held after the escalation are
+  destroyed so a step can never wait on a process the module cannot
+  reach. Tests cover a leader that exits first with a grandchild
+  ignoring SIGTERM, and an escaped member holding the pipes.
+- 2026-11-01, vars migration (review P1, eighth item). Step 06 now
+  owns moving step 04's shell-variable evaluator onto `spawnProcess`
+  (new raw chunk mode) and `childEnv`, with the byte limit and
+  trailing-newline semantics unchanged and the existing tests as the
+  acceptance criterion; `evaluateVars` gains `env` and a kill signal,
+  and step 08 passes both so `$(...)` commands run without API keys and
+  stop on abort. Step 04 carries an as-built note.
+- 2026-11-01, key focus (review P2). Ink's `useInput` has no
+  exclusive capture, so step 11 now mounts exactly one `useInput` per
+  screen (inside `useKeys`) and routes by a `focus` of `main`, `input`
+  or `confirm`; `InputBox` is a controlled component over a pure
+  `editInput` reducer and mounts no hook; an app-level overlay is the
+  only active hook while it shows. Step 13 starts in `input` focus and
+  calls `start` from one path; step 14's key table is per focus, and
+  "enter continues and records the note" is split into two keys.
+- 2026-11-01, transcript width (review P2). Step 11's `layoutBudget`
+  gains `transcriptCols`, the right column's content width (`rightCols
+  − 3`, or `columns − 2` in `narrow` mode), and `useBudget(want)`
+  returns the budget for the current and the settled terminal width
+  from that one function. Step 14 wraps at the settled `transcriptCols`
+  and clips at the current one, never at `settledColumns`; expanded
+  tool bodies wrap at `width − 2`; a reachability test checks every
+  grapheme is visible by scrolling at widths across the `narrow`
+  threshold.
+- 2026-11-01, foreign output (review P2). Ink's incremental writer
+  cannot repair a frame after a foreign stderr write, so step 07 adds
+  `diag.ts`, the only way engine code reports anything, step 10's debug
+  log goes through it, step 09 streams it under `RENSA_DEBUG`, and
+  step 11's session captures `diag`, `console.*` and Node `'warning'`
+  during rendering and prints them after the terminal is restored. A
+  test forbids `process.stdout`/`stderr` under `src/engine/` and
+  `src/tui/` outside `terminalSession.ts`.
+- 2026-11-01, skills (review P2, decided after checking the three
+  CLIs). A chain's `skills:` are inlined into the agent's first prompt
+  by the engine (`appendSkills`, step 08, with size limits enforced at
+  load); `SpawnRequest` no longer carries skill paths and no adapter
+  stages, links or flags anything. Claude's `--add-dir` staging
+  (step 10) and Grok's global-directory symlink option (step 15) are
+  removed; Codex's `.codex/skills` assumption is corrected. Reason:
+  only Claude Code has a per-process skills mechanism, and the other
+  two would require writing into the user's home or checkout.
+  Multi-file skills: the engine copies each skill directory into
+  `runs/<id>/skills/<name>/` before the first spawn and the inlined
+  `Files:` line names the copy, because every CLI restricts reads to
+  the checkout and the run directory is inside it.
+- 2026-11-01, frame rate (review P2). Step 11 writes the frame rate
+  once, `MAX_FPS` in `frameRate.ts`, and derives the batcher window
+  from it. Step 11b now defines passing at 20 or 10 fps, forbids 5,
+  ships one `MAX_FPS` (the highest every passing terminal met) and
+  records mode, frame rate and the Terminal.app exception as its
+  decision.
 - 2026-10-31, Ink 8 pass. TUI steps rewritten for `ink@8.0.0` with
   React 19.3: step 11 gains the terminal session (inline and
   fullscreen via `alternateScreen`, `incrementalRendering: true`,
@@ -258,8 +375,8 @@ this out).
   shutdown registry, PTY tests), sizing with immediate bounds and a
   50 ms settled wrap width, `Layout` with row budgets and compact
   modes, engine-owned ring buffers reachable from `RunHandle`,
-  `Spinner` on `useAnimation`, `InputBox` on `useInput` + `usePaste` +
-  `useCursor`; `useTick`, `ink-spinner` and `ink-text-input` are gone.
+  `Spinner` on `useAnimation`, `InputBox` on `usePaste` + `useCursor`
+  (keys via `useKeys`, see the key-focus note below); `useTick`, `ink-spinner` and `ink-text-input` are gone.
   Step 13 lays out through `Layout` and adds `Ratchet`. Step 14's
   transcript becomes a pure indexed viewport model (`viewport.ts`:
   Fenwick heights, logical anchor, explicit follow, streaming tail,

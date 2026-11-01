@@ -20,8 +20,7 @@ src/engine/adapters/claude/index.ts     Adapter implementation
 src/engine/adapters/claude/argv.ts      request → argv, pure
 src/engine/adapters/claude/parse.ts     stream-json lines → AgentEvent, pure
 src/engine/adapters/claude/auth.ts      availability
-src/engine/adapters/claude/skills.ts    staging
-src/engine/adapters/claude/*.test.ts    argv, parse, auth, skills: one per module, next to it
+src/engine/adapters/claude/*.test.ts    argv, parse, auth: one per module, next to it
 test/fixtures/claude/<name>/            captured, see "Fixture capture"
 ```
 
@@ -38,8 +37,9 @@ Effort table (step 03): `max` maps to `max`.
    boolean `loggedIn`; otherwise treat exit code 0 as logged in. If not
    logged in → `{ status: 'not_logged_in', hint: 'run: claude auth login' }`.
    Any failure to run the command → treat as logged in and let the run
-   surface an `auth` error; log the reason to stderr only under
-   `RENSA_DEBUG=1`.
+   surface an `auth` error; report the reason with
+   `diag('claude.auth', …)` (step 07), never to stderr: the frontend
+   decides whether and when it is shown.
 
 Verify the exact `auth status` output on the installed version and
 adjust the parser; add the observed output to a unit test.
@@ -47,7 +47,7 @@ adjust the parser; add the observed output to a unit test.
 ## argv (argv.ts)
 
 ```ts
-export function buildArgv(req: SpawnRequest, staged: { addDir?: string; personaFile?: string }): string[]
+export function buildArgv(req: SpawnRequest, staged: { personaFile?: string }): string[]
 ```
 
 Always:
@@ -58,8 +58,11 @@ claude -p --output-format stream-json --verbose --include-partial-messages
 ```
 
 Never pass `--no-session-persistence` or `--bare`: sessions must
-persist for resume, and the user's own CLAUDE.md and skills are part of
-the agent.
+persist for resume, and the user's own CLAUDE.md and project skills
+(`.claude/skills/` in the checkout) are part of the agent; `--bare`
+would also stop Claude from being told which skills exist. A chain's
+`skills:` arrive inlined in the message (step 08); this adapter does
+nothing for them.
 
 Then:
 
@@ -72,7 +75,6 @@ Then:
 | effort | `--effort <mapped>` |
 | tools read | `--tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --permission-mode dontAsk --permission-prompts none` |
 | tools write | `--permission-mode acceptEdits --allowedTools "Read,Edit,Write,Glob,Grep,Bash" --permission-prompts none` |
-| skills | `--add-dir <addDir>` (also on resume) |
 
 The message is not in argv. It is written to stdin as one line:
 
@@ -86,13 +88,10 @@ argument after `-p` and note the limit (ARG_MAX) in `index.ts`. Decide
 by trying both on the installed version and keep the one that works;
 leave the other as a documented alternative in a comment.
 
-## Skills staging (skills.ts)
+## Persona staging
 
-For `req.skills` non-empty: create `<stagingDir>/skills/.claude/skills/`
-and symlink each skill directory into it by its basename. Return
-`addDir = <stagingDir>/skills`. Nothing is written outside
-`stagingDir`. Persona file: write `req.persona` to
-`<stagingDir>/persona.md` and pass that path.
+Write `req.persona` to `<stagingDir>/persona.md` and pass that path.
+Nothing else is written outside `stagingDir`.
 
 ## Parsing (parse.ts)
 
@@ -102,8 +101,8 @@ Input: raw stdout lines. Each line is a JSON object with `type`. Emit
 | line | AgentEvent |
 |---|---|
 | `type: system, subtype: init` | nothing (record `session_id`, `model` for `done`) |
-| `type: stream_event` with `event.delta.type == 'text_delta'` | `text { text: delta.text, partial: true }` |
-| `type: assistant`, content block `text` | `text { text, partial: false }` |
+| `type: stream_event` with `event.delta.type == 'text_delta'` | `delta { text: delta.text }` |
+| `type: assistant`, content block `text` | `text { text }` (the full block; supersedes its deltas) |
 | `type: assistant`, content block `tool_use` | remember `{id, name, input}` until its result |
 | `type: user`, content block `tool_result` | `tool { name, input, ok: !is_error, output: <content as text, 4 KB cap> }` |
 | `type: result` | `done` (below) |
@@ -160,7 +159,7 @@ steps use.
   `Bash`.
 - `parse` against both captured fixtures.
 - Error classification from synthetic `result` lines.
-- Skills staging creates the symlink tree and nothing else.
+- Persona staging writes `persona.md` and nothing else.
 
 ## Verification (human)
 

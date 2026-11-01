@@ -159,7 +159,8 @@ small follow-up change, not a rewrite of the step:
 - Remove `ink-spinner` and `ink-text-input` from the dependency list
   and from `package.json`. Both predate Ink 8 (May 2024) and are not
   used: step 11 builds `Spinner` on Ink's `useAnimation` and `InputBox`
-  on `useInput` + `usePaste` + `useCursor`. _Done 2026-11-01: removed
+  on `usePaste` + `useCursor` with keys routed through the screen's
+  `useKeys` (step 11's focus model). _Done 2026-11-01: removed
   from `package.json` and the lockfile; `ink-testing-library@4.0.0`
   added as an exact dev dependency; `npm run check` passes._
 - `ink-testing-library@4.0.0` must be smoke-tested against Ink 8 before

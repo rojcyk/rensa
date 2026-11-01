@@ -61,6 +61,11 @@ agents:
     prompt: agents/implementer.md
 
     # Skill directories, each containing SKILL.md. `~` expands. (optional)
+    # Each SKILL.md is inlined as text into the agent's first prompt, so it
+    # stays in context for the whole session; the whole directory is copied
+    # into the run directory so the agent can read references/ and run
+    # scripts/ from there. Skills the CLI finds on its own in this checkout
+    # (.claude/skills, .agents/skills) need no entry.
     # skills: [~/.config/rensa/skills/code-review, ./skills/house-rules]
 
   tester:

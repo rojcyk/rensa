@@ -37,9 +37,21 @@ stderr, exit 64.
 3. `engine.start(chain, input, { headless: true, noPause, base })`.
    A `RensaError` before start prints `error: <message>` and, if
    present, `  hint: <hint>` to stderr, exit 1.
-4. Subscribe to `'event'` and `'transcript'`, print as below, await
-   `handle.done`.
-5. Exit 0 on `complete`, 1 on `failed` or `aborted`.
+4. `const { events } = handle.attach({ event: printEvent, transcript: printRecord, finished: printResult })`
+   (no `delta` listener), then print the replayed `events` through the
+   same `printEvent` before anything else arrives; `run.started` is
+   always among them, since `start()` emitted it before returning
+   (step 08). Then await `handle.done`. Never `engine.on('event')`: the
+   engine emitter carries no run events.
+5. `done` resolves with step 08's `RunResult`. Exit 0 on `complete`,
+   1 on `failed` or `aborted`. When `result.error` is set (a storage
+   failure, so no `run finished` line arrived through the events),
+   `printResult` writes `run       finished   failed  <elapsed>` to
+   stdout like the event would have, then `error: <message>` and
+   `  hint: <hint>` to stderr. After the first ctrl+c, `done` resolves only once the child has exited and the lock
+   is released (step 08), so the CLI waits up to step 06's 5 s
+   escalation; print `aborting…` once on that first press so the wait
+   is explained.
 6. `SIGINT` (ctrl+c): first press calls `handle.abort()`; second press
    within 2 s exits immediately with 130. Register this through step
    06's `onInterrupt` (from the engine index), before `engine.start()`;
@@ -48,6 +60,12 @@ stderr, exit 64.
    default applies and the first press exits 130. The `process.exit(130)`
    on the second press runs the shutdown callbacks (kill children,
    release lock) through `'exit'`; do not duplicate that cleanup here.
+7. Diagnostics: with `RENSA_DEBUG=1`, subscribe to step 07's `onDiag`
+   before `engine.start()` and write each entry to stderr as
+   `<HH:MM:SS>  diag      <scope>  <message>`; without it, ignore
+   them. `rensa doctor` does the same. This is the only consumer that
+   streams diagnostics live, because its stdout is line-oriented and
+   nothing is drawing.
 
 ## Output format (stdout)
 
@@ -67,9 +85,11 @@ One line per event, local time:
 09:24:01  run       finished   complete  11:58
 ```
 
-- Transcript text records print each line prefixed with
-  `<step>/<label> | `. Partial deltas are not printed; only final
-  `text` records, so output is line-oriented and greppable.
+- Transcript `text` records print each line prefixed with
+  `<step>/<label> | `. Shell steps arrive as one `text` record per
+  output line under label `shell` (step 08), so `npm test` output
+  prints as `<step>/shell | …` lines. `'delta'` is never subscribed,
+  so output is line-oriented and greppable.
 - Tool records print as `▸ <name> <one-line input summary>` where the
   summary is the first string-valued field of `input` truncated to 80
   chars.

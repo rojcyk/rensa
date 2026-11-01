@@ -152,3 +152,17 @@ step results and print it; confirm it reads as a document.
 ## Out of scope
 
 Deciding when to render; the engine does that in step 08.
+
+## As built
+
+- Revision 2026-11-01 (skills): the `skills:` of an agent are delivered
+  by inlining each skill's `SKILL.md` into the agent's first prompt,
+  not through any provider mechanism. The renderer for that section,
+  `appendSkills`, is created in step 08 next to the prompt assembly
+  that calls it, with the same shape and tests as `appendNotes` here.
+- Revision 2026-11-01: `vars.ts` spawns its shell commands directly
+  with `process.env`, as this step allowed "for now". Step 06 owns the
+  migration onto `spawnProcess` and `childEnv` (its "Migrate vars.ts"
+  section): `evaluateVars` gains `env` and an optional kill signal, the
+  byte limit and trailing-newline semantics are unchanged, and this
+  file's tests are the acceptance criterion there.

@@ -44,7 +44,7 @@ it when the cwd is a repo subdirectory; otherwise omit).
 | effort | `-c model_reasoning_effort=<mapped>` |
 | tools read | `--sandbox read-only` |
 | tools write | `--sandbox workspace-write --full-auto` |
-| skills | Codex discovers `~/.codex/skills/` and `<cwd>/.codex/skills/`; apply the same decision procedure as step 15 and record the outcome |
+| skills | nothing: inlined by the engine (step 08). Codex's own discovery reads `.agents/skills/` from the cwd up to the repo root, `~/.agents/skills/` and `/etc/codex/skills/`; there is no per-process flag, and `CODEX_HOME` moves auth and sessions along with skills, so it is not used |
 
 The message is the trailing positional argument of `codex exec`, or
 `-` with the message on stdin if the installed version supports it
@@ -56,8 +56,9 @@ Capture first, then write `parse.ts`. Codex `--json` emits JSONL
 events such as `thread.started` (carries the session/thread id),
 `item.started` / `item.completed` with `item.type` of
 `agent_message`, `command_execution`, `file_change`, `reasoning`, and
-`turn.completed` with token usage. Map: `agent_message` → `text`
-(final; partial deltas if the stream offers `item.delta` or similar);
+`turn.completed` with token usage. Map: completed `agent_message` → a `text`
+record (preceded by `delta` events if the stream offers `item.delta`
+or similar; step 07's union, no `partial` flag);
 `command_execution` and `file_change` completed → `tool` with `name`
 `Bash` or `Edit`, `input` from the item, `ok` from its status, `output`
 from its captured output; `turn.completed` → `usage`; end of stream →

@@ -52,12 +52,17 @@ by a crashed process may end mid-line; show the run, not an error.
 ### Status line (right-aligned, below the rule)
 
 `run <last 4 of id> · <elapsed> · <state>` where state is `running`,
-`paused before <step>`, `paused after <step>`, `complete`, `failed`,
-`aborted`. Elapsed is step 11's `<Elapsed since={progress.startedAt}
-until={progress.finishedAt}/>`, so it stops at `run.finished` and the
-status line itself never ticks. Color: `muted`; the state
-word in `accent` while running or paused, `ok` for complete, `err` for
-failed or aborted.
+`paused before <step>`, `paused after <step>`, `aborting…` (from
+`progress.status`, between the user's abort and `run.finished`, while
+the child drains), `complete`, `failed`, `aborted`. When
+`progress.error` is set the state reads `failed · <error.message>`,
+truncated to the width with `…`; this is how a storage failure, which
+has no `run.finished` event, ends the screen. Elapsed is step 11's
+`<Elapsed since={progress.startedAt} until={progress.finishedAt}/>`,
+so it stops when `progress` turns terminal, from the event or from the
+result, and the status line itself never ticks. Color: `muted`; the state
+word in `accent` while running or paused, `warn` while aborting, `ok`
+for complete, `err` for failed or aborted.
 
 ### Left column
 
@@ -105,7 +110,10 @@ jump up and down between frames.
    `AgentView` from the store, so a tick in one cell, a token update on
    another step, or a transcript delta never redraws it.
 4. Rule in `faint`.
-5. Transcript area: the rest of the body height.
+5. Transcript area: the rest of the body height, `transcriptCols`
+   wide (step 11's `layoutBudget`), which is `rightCols − 3` here and
+   `columns − 2` in `narrow` mode. Nothing in this step computes a
+   width of its own.
 
 ### Transcript viewport (rule C)
 
@@ -121,7 +129,7 @@ export class TranscriptViewport {
   // inputs
   sync(): void                                   // ingest records appended to / evicted from the buffer since last sync
   setPartial(text: string | undefined): void     // the mutable streaming tail
-  setWidth(width: number): void                  // settled width only (step 11 SizeContext.settledColumns)
+  setWidth(width: number): void                  // settled transcriptCols only (step 11 useBudget().settled), never a terminal width
   setExpanded(record: number, expanded: boolean): void
   // navigation
   scrollBy(lines: number): void; scrollTo(edge: 'top' | 'bottom'): void
@@ -190,8 +198,21 @@ interface TranscriptProps { view: RunView; step: string; label: string; height: 
 
 - Holds one `TranscriptViewport` per `(step, label)` in a ref;
   subscribes to `s.transcriptVersions.get(key)` and calls `sync()` and
-  `setPartial()` on each bump; calls `setWidth()` only when
-  `settledColumns` changes.
+  `setPartial()` on each bump. Width comes from step 11's
+  `useBudget(want)`: `setWidth(settled.transcriptCols)` whenever that
+  value changes (a settled terminal width or a compact-mode flip), and
+  the pane `Box` is `current.transcriptCols` wide for clipping. The
+  component never reads `settledColumns` or `columns` directly, so it
+  cannot wrap at a width other than the one it is drawn in. `width` in
+  `TranscriptProps` is `current.transcriptCols`; the viewport's wrap
+  width is set separately from the settled budget.
+- **Expanded tool records** wrap their body (pretty JSON and output)
+  at `width − EXPAND_INDENT` with `EXPAND_INDENT = 2` a constant the
+  model owns, so indented lines are measured at the width they are
+  drawn at. Every produced line, at every record kind, satisfies
+  `stringWidth(line) ≤ width` by construction; the `truncate` on
+  render is edge safety for the un-settled transition only and must
+  never be what makes a line fit.
 - Mounts exactly `visible(height)`: one `React.memo` row per
   `VisibleRow`, keyed by record index, given its line slice. A row's
   props change only when its slice, expansion or cursor state changes.
@@ -256,17 +277,29 @@ exercised fully.
 
 ### Keys
 
-| action | effect |
-|---|---|
-| `left`/`right` | select previous/next step; detaches follow |
-| `up`/`down` | select agent row (no-op with one row) |
-| `pageUp`/`pageDown`/`top`/`bottom` | transcript scroll |
-| `follow` (ctrl+f) | reattach: selection tracks the running step |
-| `enter` | while paused: continue (recording a note if the box has text); otherwise, with the cursor on a tool line: toggle expansion; otherwise with text in the box: `handle.note(text)`, clear the box |
-| `pause` (ctrl+p) | `handle.pause()`; status shows `pausing after <step>` until the pause event arrives |
-| `kill` (ctrl+x) | `handle.kill()` after a one-line confirmation `kill <step>? y/n` |
-| `esc` | back to chains; run continues |
-| `quit` (ctrl+c) | app-level: confirm, `handle.abort()`, exit |
+Routed by step 11's focus model: one `useKeys`, `focus` starts as
+`main`. The chords `follow`, `pause`, `kill`, `quit` act in both `main`
+and `input`.
+
+| focus | action | effect |
+|---|---|---|
+| main | `left`/`right` | select previous/next step; detaches follow |
+| main | `up`/`down` | select agent row (no-op with one row) |
+| main | `pageUp`/`pageDown`/`top`/`bottom` | transcript scroll |
+| main | `enter` | while paused: continue; otherwise with the cursor on a tool line: toggle expansion; otherwise nothing |
+| main | printable key | focus → `input`, character inserted (box enabled only while running or paused) |
+| main | `esc` | back to chains; run continues; the `RunView` is disposed and rebuilt from the handle's history on return (step 11) |
+| input | text, arrows, home/end, backspace, delete | `editInput` |
+| input | `enter` | `handle.note(text)` once, clear the box, focus → `main`; empty box: nothing |
+| input | `esc` | focus → `main`, text kept |
+| any | `follow` (ctrl+f) | reattach: selection tracks the running step |
+| any | `pause` (ctrl+p) | `handle.pause()`; status shows `pausing after <step>` until the pause event arrives |
+| any | `kill` (ctrl+x) | focus → `confirm` with `kill <step>? y/n`; `y` → `handle.kill()`; `n`/`esc` → back to the previous focus |
+| any | `quit` (ctrl+c) | app-level overlay: `abort the run? y/n`, `handle.abort()`, status shows `aborting…`, quit when `handle.done` resolves (step 11) |
+
+Continuing a paused run and sending a note are two actions on two
+keys; the old "enter continues and records the note" combination is
+gone because one key must do one thing.
 
 Follow mode is on at start. The transcript cursor for tool expansion is
 a secondary selection moved with `up`/`down` only when the step has one
@@ -274,11 +307,13 @@ agent row; document this in a comment, it is a pragmatic MVP overload.
 
 ### Note box
 
-Always rendered. Active on a running or paused run; inert (dim) once
-finished. Placeholder `note for the next steps…`. Notes are sent with
-`enter`; the box clears; the note appears in the transcript of the
-step it applies from once that step starts, via the `note` record the
-engine writes.
+Always rendered; step 11's controlled `InputBox`, its `InputState` and
+focus owned by the screen. Enabled on a running or paused run; inert
+(dim) once finished, and never focused then. Placeholder `note for the
+next steps…`. Typing any printable key in `main` focuses it; `enter`
+in `input` focus sends the note once, clears the box and returns focus
+to `main`; the note appears in the transcript of the step it applies
+from once that step starts, via the `note` record the engine writes.
 
 ### End states
 
@@ -292,10 +327,17 @@ Nothing else changes.
 `Run.tsx` takes either a live `RunHandle` or a `RunDir`; in the second
 case `RunView` is built once from `readEvents` through step 08's
 `reduceSteps(events, chain.steps)` and `reduceRun(events)`, with
-`RingBuffer`s (the engine's class) filled from `readTranscript`.
+`RingBuffer`s (the engine's class) filled from `readTranscript`. The
+live case seeds itself the same way from `handle.attach()`'s history
+and the handle's buffers (step 11), so the two paths share the seeding
+code and differ only in where the events and records come from.
 No entry point in the MVP opens it that way (history screen deferred),
 but the component must support it so the deferred feature is a
-navigation change, not a rewrite. Test it.
+navigation change, not a rewrite. Test it. A run that ended on a
+storage failure has no `run.finished` on disk and no in-memory result
+once its process is gone, so this path shows it as still running; that
+is the correct reading of the file and the deferred history screen
+decides what to do about it.
 
 ## Files to create
 
@@ -320,8 +362,25 @@ pinned exactly (index.md "Pinned versions").
 ## Tests
 
 - `format`: elapsed and token formatting edge cases.
+- Focus routing on the run screen: type `abc` then `left` twice: the
+  caret is at 1, the selected step and the follow flag are unchanged;
+  `enter` calls `handle.note('abc')` exactly once, never `resume()`,
+  clears the box and returns focus to `main`; while paused, `enter` in
+  `main` calls `resume()` once and `note()` never; `ctrl+x` then `y`
+  while a note is half-typed calls `kill()` once and leaves the note
+  text intact; `ctrl+p` while typing calls `pause()`; `esc` in `input`
+  keeps the text and does not navigate; `esc` in `main` navigates.
 - Snapshot of the running mock from a scripted `RunView` fed with
   events from a fake-provider run.
+- A `RunView` whose progress carries a `STORAGE` error renders the
+  status line as `failed · EACCES…` in `err`, spinners unmounted and
+  every `Elapsed` stopped, with no `run.finished` in its events.
+- Open the run screen on a fake run that already completed: the first
+  frame shows the end state, the base from `run.started` in the header
+  block and all transcripts, with no `running` flash. Leave with `esc`
+  mid-run, start a second read-only fake chain, return to the first:
+  its rows and transcripts are its own and the second run's steps do
+  not appear.
 - Agent row isolation: with a render-count probe on `AgentRows`,
   advancing fake timers by 5 s re-renders the leaves but not the row;
   a transcript record on the same step does not re-render the row
@@ -330,7 +389,14 @@ pinned exactly (index.md "Pinned versions").
   CJK, combining marks, emoji sequences (ZWJ, flags, skin tones), tabs
   at 8-column stops, blank lines, trailing newlines, words longer than
   the width, and tool expansion, each asserting the wrapped lines and
-  `totalLines()`; anchor preserved across a width change (the same
+  `totalLines()`; **reachability**: for a fixture of 300 records mixing
+  long words, CJK, emoji, blank lines and one expanded tool record, at
+  widths 20, 37, 57 and 80 (the last two straddle the `narrow`
+  threshold's `transcriptCols`), scrolling from `top` to `bottom` one
+  page at a time and concatenating each record's visible lines in
+  order yields that record's normalized text exactly, for every
+  record, and every visible line has `stringWidth ≤ width`; anchor
+  preserved across a width change (the same
   grapheme stays on the top line), across expansion of a record above,
   and across eviction (clamps to `buffer.start`); follow detaches on
   `scrollBy` and reattaches on `follow()` and `scrollTo('bottom')`;
@@ -349,8 +415,11 @@ pinned exactly (index.md "Pinned versions").
   most 20 rows (probe on the row component); a `pageDown` re-renders
   only rows that entered; one appended record while following
   re-renders the pane and the bottom-edge row, not the rows above; a
-  `settledColumns` change rewraps, a bounds-only change does not (rows
-  are truncated, not re-wrapped, until it settles).
+  `settled.transcriptCols` change rewraps, a bounds-only change does
+  not (rows are truncated, not re-wrapped, until it settles); with the
+  terminal at 100 columns and a chain whose `leftCols` is 15, the
+  viewport's width is 82, not 100 (assert the `setWidth` argument on a
+  spy), and crossing to 59 columns sets it to 57.
 - Painting, color-aware: in fullscreen the selected step row carries
   the selection background on every cell to the column's edge; empty
   transcript cells carry the root background; the gap column between

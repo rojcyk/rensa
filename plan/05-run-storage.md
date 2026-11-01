@@ -182,6 +182,9 @@ Differences from the spec above, for anyone reading this step later:
   like `readEvents`, and both readers order warnings by line.
   `NewTranscriptRecordSchema` (records minus `t`) is what step 07's
   parsers emit.
+- Revision 2026-11-01 (skills): step 08 adds `skills/<name>/` under a
+  run's `root`, a copy of each skill directory the run's agents list.
+  `RunDir` is unchanged; `createRunDir` does not pre-create it.
 - Revision R5: nothing in storage changes, but interpreting the event
   log is engine logic, not UI logic. The original plan had the TUI
   (step 11) reduce `events.jsonl` into per-step status and timestamps,

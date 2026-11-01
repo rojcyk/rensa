@@ -17,8 +17,17 @@ placeholder; this step publishes over it.
    22+, at least one of the three CLIs installed and logged in), a
    60-second start (create `.rensa/`, copy the minimal chain below,
    run `rensa`), links to `docs/chain.yaml` and `docs/project.yaml`,
-   the key map for the run screen, and a "not yet" list: parallel
-   agents, conditionals, loops, worktrees, Windows.
+   the key map for the run screen, a "not yet" list: parallel
+   agents, conditionals, loops, worktrees, Windows, and a short
+   "limits" list: `SIGKILL` of rensa itself leaves the terminal and
+   children as they were (step 11); a child that moves itself out of
+   its process group with `setsid` is not stopped by kill, abort or
+   exit (step 06). Also a short "skills" paragraph: an agent's
+   `skills:` are inlined into its first prompt as text (so they count
+   against context on every turn), and each CLI additionally finds the
+   skills it would find on its own in this checkout (`.claude/skills/`
+   for Claude and Grok, `.agents/skills/` for Codex and Grok; Grok only
+   in a folder it has been told to trust).
 
    Minimal chain for the README:
 

@@ -52,30 +52,28 @@ taken in `meta.json` of the fixtures.
 | effort | `--effort <mapped>` |
 | tools read | `--tools <read-only tool list>` plus `--deny` rules for anything that writes; discover the built-in tool names with `grok inspect --json` or `grok --help` and pin them in `argv.ts` with a comment naming the CLI version |
 | tools write | `--always-approve` |
-| skills | see below |
 
 ## Skills
 
-Grok has no `--add-dir`. Options, decide at implementation time after
-checking `grok inspect`:
-
-1. If Grok discovers `<cwd>/.grok/skills/` and the repository does not
-   have a `.grok/` directory, do not use it; writing into the user's
-   checkout is out.
-2. Stage symlinks into `~/.grok/skills/rensa-<run id>-<name>` for the
-   duration of the spawn and remove them in `done`. Acceptable only if
-   `grok inspect` confirms discovery there; document the behavior in
-   the adapter.
-3. If neither works, `skills:` on a grok agent is a `CONFIG_INVALID`
-   error with the message "grok adapter cannot load skills in this
-   version"; the persona prompt is the fallback.
+Nothing to do here: a chain's `skills:` are inlined into the message
+by the engine (step 08). For the record, checked against Grok 1.0.70
+and its bundled guide: `grok -p` has `--add-dir` but no per-process
+skills or plugin flag, discovery reads only the checkout
+(`.grok/skills/`, `.claude/skills/`, `.agents/`), the user's home and
+`[skills] paths` in `~/.grok/config.toml`, the `GROK_CONFIG` overlay
+cannot add a discovery source, and project skills load only in a
+trusted folder. `grok agent --plugin-dir` is per process but is the
+ACP protocol, not this adapter's `-p` mode. Never write under `~/.grok`
+or into the checkout for skills. The user's own project skills are
+still found by Grok's discovery when the folder is trusted.
 
 ## Parser
 
 Capture first (`rensa capture grok read-only-hello "..."` from step
 10's dev command), then write `parse.ts` against the captured lines.
-Map whatever the stream offers onto `text` (partial and final), `tool`
-(name, input, ok, output), `usage`, and `done`. Treat unknown event
+Map whatever the stream offers onto step 07's union: `delta` for
+streamed text if the CLI streams, then a `text` record per finished
+block; `tool` (name, input, ok, output), `usage`, and `done`. Treat unknown event
 types as `raw` only. Error classification: usage-limit and
 authentication messages as observed in real output; add them to the
 fixture `meta.json` note.

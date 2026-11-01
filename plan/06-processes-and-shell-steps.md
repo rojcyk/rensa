@@ -4,9 +4,14 @@
 
 The one place in the codebase that spawns child processes, with the
 behaviors every consumer needs: process-group kill, timeout, line-by-line
-stdout and stderr, stdin writing, environment stripping. On top of it,
-the shell step executor, and the one process-wide shutdown hook that
-every later step uses to clean up synchronously when the process dies.
+or raw stdout and stderr, stdin writing, environment stripping. On top
+of it, the shell step executor, and the one process-wide shutdown hook
+that every later step uses to clean up synchronously when the process
+dies. This step also moves the one spawn of user-authored commands
+that already exists, step 04's shell-variable evaluator, onto this
+module. After this step the only other `child_process` import under
+`src/engine/` is step 02's `execFile` of `git rev-parse` in
+`config/paths.ts`, a fixed read-only command that stays as it is.
 
 ## Context
 
@@ -22,6 +27,8 @@ src/engine/process/shutdown.ts
 src/engine/process/spawn.ts
 src/engine/process/shell.ts
 src/engine/process/*.test.ts     one per module, next to it
+src/engine/template/vars.ts      modify: spawn through spawn.ts (see "Migrate vars.ts")
+src/engine/template/vars.test.ts modify: two added cases; every existing case unchanged
 ```
 
 ## shutdown.ts
@@ -129,8 +136,11 @@ interface SpawnOptions {
   argv: string[]; cwd: string; env: NodeJS.ProcessEnv
   stdin?: string                     // written then closed; absent → stdin closed immediately
   timeoutMs: number
-  onStdout?: (line: string) => void
+  escalateMs?: number                // SIGTERM → SIGKILL grace, default 5000; tests pass 200
+  onStdout?: (line: string) => void          // line mode: through lineReader
   onStderr?: (line: string) => void
+  onStdoutChunk?: (chunk: Buffer) => void    // raw mode: every chunk as received, no splitting, no \r stripping
+  onStderrChunk?: (chunk: Buffer) => void    // a stream takes one mode or the other, never both
 }
 interface SpawnResult { exitCode: number | null; signal: NodeJS.Signals | null; timedOut: boolean; killed: boolean; durationMs: number }
 interface Child { pid: number; kill(): void; result: Promise<SpawnResult> }
@@ -139,10 +149,26 @@ export function spawnProcess(opts: SpawnOptions): Child
 
 - `child_process.spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: ['pipe','pipe','pipe'] })`.
   `detached: true` puts the child in its own process group.
-- `kill()`: `process.kill(-pid, 'SIGTERM')`; after 5 s, if still
-  running, `SIGKILL` the group. Idempotent.
-- Live-children registry: a module-level `Set<number>` of pgids. Add on
-  spawn, delete when the process exits. At module load, register one
+- Everything here is about the **process group**, never the direct
+  child alone. The child is the group leader, but a group outlives its
+  leader: `/bin/sh -c` exits on SIGTERM while a grandchild that traps
+  or ignores SIGTERM keeps running, keeps the group alive, and keeps
+  the inherited stdout/stderr pipe ends open. Whether the group still
+  exists is answered by `process.kill(-pid, 0)`: it succeeds while any
+  member lives and throws `ESRCH` once the group is gone. Call that
+  `groupAlive(pid)`. A grandchild that leaves the group with its own
+  `setsid` is out of reach by definition, as for every process-group
+  tool; the README (step 17) says so.
+- `kill()`: `process.kill(-pid, 'SIGTERM')`, ignoring `ESRCH`; after
+  `escalateMs`, `process.kill(-pid, 'SIGKILL')` to the group
+  unconditionally, ignoring `ESRCH`. The escalation does not consult
+  whether the leader has exited: that is the case it exists for.
+  Idempotent: a second `kill()` neither re-sends SIGTERM nor restarts
+  the timer.
+- Live-groups registry: a module-level `Set<number>` of pgids. Add on
+  spawn. Remove only when `result` has settled **and** `groupAlive`
+  is false; if the group is still alive when `result` settles (an
+  escaped member), leave it registered. At module load, register one
   callback through `onShutdown` that sends `SIGKILL` to every group
   still in the set (`process.kill(-pid, 'SIGKILL')`, ignoring `ESRCH`).
   No `SIGTERM`, no grace period: this path runs inside `'exit'`, where
@@ -152,10 +178,71 @@ export function spawnProcess(opts: SpawnOptions): Child
 - Timeout: a timer that calls `kill()` and sets `timedOut`.
 - `ENOENT` on spawn rejects `result` with `RensaError('PROCESS')`
   naming `argv[0]`.
-- Both output streams go through `lineReader`; `result` resolves only
-  after both readers finished and the process exited, so no line is
-  lost.
+- Each output stream goes through `lineReader` (line mode) or straight
+  to the chunk callback (raw mode, for consumers that need bytes and
+  exact trailing-newline semantics); `result` resolves only after both
+  streams ended and the process exited, so no line or byte is lost. One bound on that: after the SIGKILL escalation, if either
+  reader has not reached end of file within a further `escalateMs`,
+  destroy both pipe streams and resolve `result` anyway with
+  `killed: true` and the lines received so far. Only an escaped member
+  of the group can hold the pipes past a group SIGKILL, and a step must
+  never wait on a process this module cannot reach. `result` thus
+  always settles within `2 × escalateMs` of `kill()`.
 - Never `shell: true` here.
+
+## Migrate vars.ts
+
+Step 04's `evaluateVars` spawns `/bin/sh -c` itself with
+`{ ...process.env, ...bindings }`, a private 60 s timer, a 10 MiB
+stdout limit and a direct SIGKILL of the group, and carries a TODO for
+this step. Left as is, `$(...)` variables would run with the user's API
+keys in their environment, could not be killed by step 08's abort, and
+would be invisible to the shutdown registry. Replace the private spawn
+with `spawnProcess` in raw mode and change nothing the evaluator's
+tests observe:
+
+```ts
+export async function evaluateVars(
+  vars: Record<string, VarSpec>, ns: Namespace, cwd: string,
+  env: NodeJS.ProcessEnv,              // from childEnv(); the caller decides allowApiKeys
+  signal?: KillSignal,                 // step 08's abort reaches a running var command through it
+): Promise<Record<string, unknown>>
+```
+
+- `env` is `childEnv(process.env, { allowApiKeys })` built by the
+  caller (step 08 passes the chain's flag); the per-command placeholder
+  bindings from `renderForShell` are merged on top, so they still reach
+  the shell as environment data. `NO_COLOR=1` and `TERM=dumb` now apply
+  to var commands too.
+- `spawnProcess({ argv: ['/bin/sh', '-c', script], cwd, env, timeoutMs: 60_000, onStdoutChunk, onStderrChunk })`
+  with stdin absent (closed). The byte counting stays in `vars.ts`:
+  stdout chunks accumulate up to 10 MiB, past which the evaluator
+  records the reason and calls `child.kill()` (SIGTERM, then the
+  escalation, instead of today's immediate SIGKILL); stderr keeps its
+  2000-byte cap and 500-character tail.
+- `signal.onKill(() => child.kill())` when a signal is given, so an
+  abort during evaluation ends the command within the escalation
+  grace, not after 60 s.
+- Outcome mapping from `SpawnResult`: `exitCode === 0 && !killed &&
+  !timedOut` → the value is stdout decoded as UTF-8 with exactly one
+  trailing newline stripped; otherwise `RensaError('TEMPLATE')` with
+  the same messages as today (the recorded byte-limit reason, "timed
+  out after 60 s", "was killed by <signal>", "exited with <code>"), the
+  stderr tail appended. A shell that exited 0 while a background child
+  held the pipes still fails as a timeout, since `result` then settles
+  through the timeout path with `killed: true`.
+- The private timer, the `process.kill(-pid, 'SIGKILL')` and the
+  `child_process` import are deleted. The 60 s timeout, the 10 MiB
+  limit and the stderr limits remain constants in `vars.ts`.
+
+The existing `vars.test.ts` cases are the acceptance test for this
+migration and must pass unchanged, including the fake-timer timeout
+cases and the trailing-newline case. Two cases are added: with
+`ANTHROPIC_API_KEY` set in the test process, `$(printf '%s'
+"$ANTHROPIC_API_KEY")` evaluates to the empty string, and with
+`allowApiKeys: true` it evaluates to the key; and while a var command
+runs, its pgid is in the live-groups registry (expose the set
+read-only for tests) and is gone once `evaluateVars` resolves.
 
 ## shell.ts
 
@@ -206,6 +293,22 @@ export async function runShellStep(opts: {
   `timedOut`; a shell script that spawns a background `sleep` is fully
   killed (check with `ps` that the grandchild is gone after `kill()`);
   missing binary rejects with `PROCESS`.
+- Leader exits first, grandchild ignores SIGTERM, `escalateMs: 200`:
+  `sh -c '(trap "" TERM; exec sleep 30) & exec sleep 30'`. The leader
+  becomes a plain `sleep` that dies on SIGTERM; the backgrounded
+  subshell sets SIGTERM to ignored, a disposition that survives `exec`,
+  so its `sleep` ignores the SIGTERM while holding the inherited pipes.
+  After `kill()`: `result` resolves within 1 s with `killed: true`;
+  `ps` shows no `sleep` from this test; the pgid is no longer in the
+  registry. Also assert the registry still held the pgid 100 ms after
+  `kill()`, when the leader was already gone but the grandchild was
+  not.
+- Escaped member holding the pipes, `escalateMs: 200`: a leader that
+  starts `setsid sleep 30` (Linux) or `perl -e 'setsid; exec "sleep",
+  30'` (both platforms) sharing stdout, then exits. After `kill()`,
+  `result` resolves within about 400 ms with `killed: true` even though
+  a writer still holds the pipe; the pgid stays in the registry; the
+  test then kills the escaped `sleep` itself.
 - Shutdown kill: spawn a `sleep 30`, call `runShutdown()`, check with
   `ps` that the child is gone. Because `runShutdown` is once-only per
   process, this test runs in its own file (`spawn.shutdown.test.ts`)
@@ -216,8 +319,8 @@ export async function runShellStep(opts: {
 ## Verification (human)
 
 Run the process tests on macOS and on Linux (CI covers Linux). Confirm
-the grandchild-kill test passes on macOS, where process-group semantics
-differ subtly. Then, from a scratch script that imports `spawnProcess`,
+the grandchild-kill tests pass on macOS, where process-group semantics
+differ subtly, in particular the leader-exits-first case. Then, from a scratch script that imports `spawnProcess`,
 start a `sleep 60` and send the script `SIGTERM`: `ps` must show no
 leftover `sleep`.
 

@@ -24,11 +24,37 @@ src/engine/adapters/registry.ts
 src/engine/adapters/available.ts
 src/engine/adapters/fake/index.ts
 src/engine/adapters/fake/fixture.ts
+src/engine/diag.ts                 diagnostics sink: the only place engine code sends a message "to the user"
 test/fixtures/fake/hello/          hand-written fixture for tests
 src/engine/adapters/available.test.ts
 src/engine/adapters/fake/index.test.ts
 src/engine/adapters/fake/fixture.test.ts
+src/engine/diag.test.ts
 ```
+
+## Diagnostics sink (diag.ts)
+
+```ts
+export function diag(scope: string, message: string): void
+export function onDiag(fn: (entry: { t: string; scope: string; message: string }) => void): () => void
+export function drainDiag(): ReadonlyArray<{ t: string; scope: string; message: string }>   // returns and clears the buffer
+```
+
+Nothing under `src/engine/` writes to `process.stdout`, `process.stderr`
+or `console`. Why: the TUI (step 11) renders with Ink's incremental
+writer, which moves the cursor relative to where it believes the last
+frame ended and repaints only lines it considers changed; one foreign
+`stderr` line during a session shifts the cursor and leaves the frame
+misaligned until a full repaint. The engine therefore has no opinion
+about where a diagnostic goes: `diag()` appends to a bounded in-memory
+buffer (200 entries, oldest dropped) and notifies listeners, and the
+frontend decides. The headless CLI streams entries to stderr (step
+09); the TUI records them and prints after the terminal is restored
+(step 11). First consumer: the Claude availability check (step 10)
+under `RENSA_DEBUG`; the gate is the frontend's, not the caller's, so
+engine code calls `diag()` unconditionally and cheaply.
+All three functions are exported from `src/engine/index.ts`, since the
+frontends import the engine only through it.
 
 ## Contract (types.ts)
 
@@ -45,7 +71,6 @@ interface SpawnRequest {
   message: string                     // the rendered step prompt
   persona?: string                    // agent prompt file contents, first use only
   model?: string; effort?: Effort; tools: Tools
-  skills: string[]                    // absolute skill directories
   session: { id: string; resume: boolean }
   stagingDir: string                  // runs/<id>/agents/<step>/<label>/ for adapter scratch
   timeoutMs: number
@@ -82,9 +107,28 @@ Rules every adapter follows:
 - `delta` carries only new text, for display while a block streams; the
   `text` record that follows carries the full block and supersedes the
   deltas for that block. Only records reach `transcript.jsonl`; deltas
-  never do.
+  never do. This union is the only streaming vocabulary in the
+  codebase: no record type has a `partial` field, in step 05's schema,
+  in any adapter (steps 10, 15, 16) or on the engine's events (step
+  08). An adapter that can only observe a finished block emits the
+  record and no deltas; one that streams emits deltas and then the
+  record. The engine (step 08) treats any record for a key as the end
+  of the deltas accumulated for that key.
 - The adapter never writes to the run directory itself except inside
-  `stagingDir`, and never prints.
+  `stagingDir`, and never prints: anything worth telling the user goes
+  through `diag()`.
+- Adapters know nothing about skills. A chain's `skills:` are inlined
+  into the message by the engine (step 08) before `spawn` is called, so
+  `SpawnRequest` carries no skill paths and no adapter stages, links or
+  flags anything for them. Why: of the three CLIs only Claude Code has
+  a per-process way to load a skills directory (`--add-dir`); Grok's
+  single-turn mode and Codex have none, and their discovery roots are
+  the checkout and the user's home, which an adapter must not write
+  into. Inlining is the one mechanism that works on every provider,
+  per agent, and writes nothing anywhere. Skills the user keeps in a
+  CLI's own project or home folders (`.claude/skills/`,
+  `.agents/skills/`, `~/.grok/skills/`, …) are still found by that
+  CLI's native discovery; rensa neither adds to nor blocks that.
 
 ## Registry (registry.ts)
 
@@ -173,12 +217,18 @@ lines.
   ```
 
   `kill()` stops replay and emits `done` with `exitCode: null`,
-  `error.kind: 'exit'`, `message: 'killed'`.
+  `error.kind: 'exit'`, `message: 'killed'`, after
+  `RENSA_FAKE_KILL_DELAY_MS` (default 0) so step 08 can test that the
+  run is finished only once that late `done` has arrived.
 - Records `req` into `stagingDir/request.json` so engine tests can
   assert what was sent (message, persona presence, session flags).
 
 ## Tests
 
+- `diag`: entries carry `t`, `scope`, `message`; a listener receives
+  each; the buffer keeps the last 200; `drainDiag()` returns them in
+  order and empties the buffer; with `process.stdout.write` and
+  `process.stderr.write` spied, a `diag()` call writes nothing.
 - Fixture helper round-trips the hand-written fixture through the fake
   adapter's `parse`.
 - `kill()` mid-replay yields exactly one `done` with `killed` message.

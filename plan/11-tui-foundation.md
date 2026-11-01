@@ -51,15 +51,17 @@ src/tui/layout.ts                        pure layoutBudget(); compact-mode thres
 src/tui/components/Layout.tsx            header / body / footer slots with row budgets; clipping
 src/tui/size.tsx                         SizeContext: bounds (immediate) and settledColumns (50 ms)
 src/tui/store.ts                         createStore, useStore
-src/tui/batch.ts                         coalesces engine events into one setState per 50 ms
+src/tui/frameRate.ts                     MAX_FPS and FRAME_MS; the only place the frame rate is written
+src/tui/batch.ts                         coalesces engine events into one setState per frame (FRAME_MS)
 src/tui/engineBridge.ts                  RunView: engine events → store via step 08's applyEvent
 src/tui/components/Header.tsx
 src/tui/components/Rule.tsx
 src/tui/components/Frame.tsx             the rounded box used on the detail screen
 src/tui/components/Spinner.tsx           leaf on useAnimation
 src/tui/components/Elapsed.tsx           leaf on its own 1 s interval
-src/tui/components/InputBox.tsx          useInput + usePaste + useCursor; shared by steps 13 and 14
-src/tui/hooks/useKeys.ts
+src/tui/components/InputBox.tsx          controlled text box: usePaste + useCursor, no useInput; shared by steps 13 and 14
+src/tui/components/editInput.ts          pure editing reducer for InputBox state
+src/tui/hooks/useKeys.ts                 the one useInput per screen; focus-aware routing
 src/tui/format.ts                        elapsed formatter only; step 14 adds the rest
 src/engine/run/ringBuffer.ts             engine-owned bounded buffer with absolute indices
 src/cli/main.ts                          wire `rensa`, `rensa <chain>`, `--fullscreen`, `--inline`
@@ -114,15 +116,18 @@ export function resolveMode(flags: { fullscreen?: boolean; inline?: boolean }, e
 export function startSession(mode: Mode, app: React.ReactElement): Session
 interface Session {
   quit(): Promise<void>        // normal quit; see below
-  readonly done: Promise<void> // resolves when quit() has finished; never rejects
+  readonly done: Promise<void> // settles when Ink has exited, however that happened; rejects on a React crash
 }
 ```
 
 ```ts
+export const MAX_FPS = 20                          // src/tui/frameRate.ts; step 11b may set it to 10, nothing else
+export const FRAME_MS = Math.round(1000 / MAX_FPS) // the batcher window (batch.ts) is derived, never a second constant
+
 render(<App mode={mode} />, {
   alternateScreen: mode === 'fullscreen',
   incrementalRendering: true,     // both modes, from the first frame
-  maxFps: 20,
+  maxFps: MAX_FPS,
   exitOnCtrlC: false,             // the app owns ctrl+c (useKeys)
   patchConsole: false,            // see main.ts wiring
 })
@@ -141,45 +146,80 @@ render(<App mode={mode} />, {
 - **Cleanup is registered before rendering**, including for the
   startup-failure path: `startSession` registers the fatal restore
   through step 06's `onShutdown` (re-exported by the engine index) as
-  its first statement, then calls `render`. If `render` itself throws,
-  the registered restore runs on exit and finds nothing acquired, so it
-  emits nothing.
-- **Ownership is explicit.** The session keeps a record of what this
-  process acquired: `{ rendered: boolean; alternateScreen: boolean; rawMode: boolean }`.
-  `alternateScreen` is set true only when `mode === 'fullscreen'` and
-  stdout is a TTY and `render` returned; `rawMode` when stdin is a TTY
-  and `render` returned (the root always mounts `useInput`, which puts
-  stdin in raw mode). Restoration consults this record and nothing
-  else: it never counts or inspects signal listeners, Ink's or anyone
-  else's, and never emits the alternate-screen exit sequence in inline
-  mode or when stdout is not a TTY.
+  its first statement, then fills in the record below, then calls
+  `render`. If `render` itself throws, the registered restore runs on
+  exit and restores exactly what the record says Ink had entered by
+  then.
+- **Ownership is explicit and tracks Ink's actual sequence.** The
+  session keeps a record of what this process acquired:
+  `{ alternateScreen: boolean; cursorHidden: boolean; rendered: boolean; rawMode: boolean }`.
+  Ink enters the alternate screen and hides the cursor inside the
+  `Ink` constructor, before it probes the keyboard protocol, patches
+  the console or mounts React, so a throw anywhere inside `render`
+  after that point leaves both in place. The record therefore sets
+  `alternateScreen` and `cursorHidden` **before** calling `render`,
+  under the same condition Ink applies: `mode === 'fullscreen'` and
+  stdout is a TTY (and not CI). `rendered` and `rawMode` are set after
+  `render` returns; `rawMode` only when stdin is a TTY (the root always
+  mounts `useInput`, which puts stdin in raw mode). Before `render`
+  the flags mean "Ink will have entered this"; after, "Ink holds this".
+  Restoration consults this record and nothing else: it never counts
+  or inspects signal listeners, Ink's or anyone else's, and never
+  emits the alternate-screen exit sequence in inline mode or when
+  stdout is not a TTY. Every path that releases the terminal, Ink's or
+  ours, clears the flags it released, so the record is also how the
+  session knows nothing is left to do.
 - **Normal quit** (`esc`/`ctrl+c` accepted, or the app deciding to
   exit): `quit()` stops the engine subscriptions and the batcher,
   clears every interval owned by the UI, calls `instance.unmount()`,
   then `await instance.waitUntilExit()`, marks the record as released,
-  resolves, and resolves `done`. `quit()` is idempotent: a second call
-  returns the same promise. Components call `quit()`; `main.ts` never
-  does. It awaits `session.done`, which is how it learns the app has
-  exited without knowing why, and only then prints any final
-  diagnostics to stderr, so they land on the primary screen after Ink
-  has restored it, never inside the alternate screen where Ink would
-  discard them. `done` is a promise created in `startSession` and
-  settled only by `quit()`; a fatal exit never reaches it, since the
-  process is gone.
+  and resolves. `quit()` is idempotent: a second call returns the same
+  promise. Components call `quit()`; `main.ts` never does. It awaits
+  `session.done` (below), which is how it learns the app has exited
+  without knowing why, and only then prints any final diagnostics to
+  stderr, so they land on the primary screen after Ink has restored
+  it, never inside the alternate screen where Ink would discard them.
+- **`done` observes Ink, not `quit()`.** Right after `render` returns,
+  `startSession` calls `instance.waitUntilExit()` once and keeps the
+  promise; `done` is derived from it. Resolution means Ink unmounted
+  normally, whether through `quit()`, Ink's own `beforeExit` hook or
+  `signal-exit`, and `done` resolves. Rejection means a React crash:
+  Ink wraps the tree in its own error boundary, and a throw during
+  render or in an effect is caught there, drawn as Ink's error
+  overview, and turned into `unmount(error)`, which rejects the exit
+  promise. Ink attaches a no-op `catch` to that promise, so the throw
+  never becomes an `uncaughtException` and step 06's handler never
+  sees it. On rejection `startSession` runs the same teardown `quit()`
+  runs (engine subscriptions, batcher, intervals), marks the record as
+  released, since Ink's unmount already left raw mode and the
+  alternate screen, and rejects `done` with the error. It does nothing
+  else: exiting the process is `main.ts`'s decision. Exceptions thrown
+  from `useInput` handlers, timers and promise callbacks take the other
+  path and reach step 06's `uncaughtException` handler; they are not
+  Ink's to catch.
 - **Fatal exit** (uncaught exception, `SIGTERM`, `process.exit` from
-  anywhere): the `onShutdown` callback runs synchronously. It calls
-  `instance.unmount()` if an instance exists and `rendered` is set,
-  which is Ink's own synchronous teardown and must run first so the
-  primary screen is not restored while Ink may still flush a frame;
-  in alternate-screen mode Ink discards output produced during this
-  teardown. Then it restores, idempotently, only what the record still
-  marks acquired and Ink may not have reached: `setRawMode(false)` if
-  `rawMode`, `\x1b[?1049l` if `alternateScreen`, then `\x1b[?25h` and
-  `\x1b[0m` if `rendered`. Each write clears its flag so a second run
-  emits nothing. Because step 06's registry runs callbacks LIFO and
-  this one is registered last (after the engine's), the terminal is
-  sane before children are killed, the lock is released, and the
-  uncaught exception's stack is printed by the registry's handler.
+  anywhere): the `onShutdown` callback runs synchronously, in two
+  stages. **Stage one, Ink.** If an instance exists and `rendered` is
+  set, call `instance.unmount()` inside a `try`. Ink's unmount is fully
+  synchronous: it tears down React with the sync reconciler, which
+  runs `useInput`'s cleanup and disables raw mode, then writes
+  leave-alternate-screen and show-cursor if it holds the alternate
+  screen. It must run first so the primary screen is not restored
+  while Ink may still flush a frame; in alternate-screen mode Ink
+  discards output produced during this teardown. If `unmount` returns,
+  clear all four flags: Ink has released everything, and a second
+  leave sequence from us would be a duplicate (the PTY tests assert
+  exactly one). If it throws, leave the flags as they are. **Stage
+  two, ours.** Restore, idempotently, whatever the record still marks
+  acquired, which after a successful stage one is nothing, and after a
+  throw in `render` or in `unmount` is what Ink entered and did not
+  leave: `setRawMode(false)` if `rawMode`, `\x1b[?1049l` if
+  `alternateScreen`, `\x1b[?25h` if `cursorHidden`, then `\x1b[0m` if
+  `rendered`. Each write clears its flag so a second run emits nothing.
+  Because step 06's registry runs callbacks LIFO and this one is
+  registered last (after the engine's), the terminal is sane before
+  children are killed, the lock is released, and the uncaught
+  exception's stack is printed by the registry's handler.
 - **`SIGKILL`** has no guarantee; say so in the README (step 17).
 
 ## Sizing (size.tsx, layout.ts, Layout.tsx)
@@ -190,9 +230,16 @@ through `SizeContext` as two values:
 ```ts
 interface Size {
   columns: number; rows: number      // current bounds: applied immediately to layout and clipping
-  settledColumns: number             // last width unchanged for 50 ms: the only width used for wrapping
+  settledColumns: number             // last width unchanged for 50 ms: the only width wrapping derives from
 }
 ```
+
+`settledColumns` is a terminal width and is never handed to anything
+that wraps text. Wrapping happens inside a pane, and a pane's content
+width is a function of the terminal width (`layoutBudget` below). The
+settled pane width is that same function applied to `settledColumns`,
+so "current" and "settled" are two inputs to one calculation, never
+two calculations.
 
 - **Bounds are immediate.** Every `Box` width and height, every clip,
   and the layout budget follow `columns`/`rows` on the same frame as
@@ -222,8 +269,26 @@ interface Size {
 
   ```ts
   export function layoutBudget(size: { columns: number; rows: number }, want: { headerRows: number; footerRows: number; leftIdWidth?: number }): Budget
-  interface Budget { headerRows: number; bodyRows: number; footerRows: number; leftCols: number; rightCols: number; compact: 'none' | 'narrow' | 'short' }
+  interface Budget {
+    headerRows: number; bodyRows: number; footerRows: number
+    leftCols: number; rightCols: number
+    transcriptCols: number           // the width text in the right column wraps and is clipped to; see below
+    compact: 'none' | 'narrow' | 'short'
+  }
   ```
+
+  `transcriptCols` is the content width of the right column: in
+  two-column layout `rightCols − 3` (the `│` separator, one space, one
+  space of indent); in `narrow` compact mode, where the left column and
+  separator are gone, `columns − 2` (indent only); never below 1. This
+  is the **only** definition of the transcript's width in the
+  codebase. Step 14 wraps at `layoutBudget({ columns: settledColumns,
+  rows }, want).transcriptCols` and clips at `layoutBudget({ columns,
+  rows }, want).transcriptCols`; the two agree whenever the width has
+  settled, and across the `narrow` threshold both jump by the same
+  amount because they are the same function. `SizeContext` exposes
+  both through one hook, `useBudget(want): { current: Budget; settled: Budget }`,
+  memoized on `(columns, rows, settledColumns, want)`.
 
   Compact presentation is defined, not improvised: `columns < 60` →
   `narrow`: the left column is dropped and the body shows a one-line
@@ -255,9 +320,18 @@ type Screen = { name: 'chains' } | { name: 'detail'; chain: string } | { name: '
 
 State lives in `app.tsx`; screens receive `navigate(screen)`. `esc` on
 detail returns to chains; `esc` on run returns to chains while the run
-continues (the handle stays in app state). `ctrl+c`: if a run is
-active, show a one-line confirmation `abort the run? y/n`; `y` aborts
-and quits; otherwise quit. Quitting means calling the session's
+continues: the handle stays in app state (a list, since read-only runs
+take no lock and a second one may be started), the `RunView` is
+disposed, and re-entering builds a new `RunView` from the handle's
+history. Two live runs never share state: each `RunView` is attached
+to one handle and the engine emitter carries no run events. `ctrl+c`: if a run is
+active, show a one-line confirmation `abort the run? y/n` as an
+app-level overlay with the only active `useKeys` (the screen's is
+inactive while it shows, see "Focus"); `y` calls
+`handle.abort()`, shows `aborting…` while the child drains, and quits
+when `handle.done` resolves (up to step 06's 5 s escalation), so the
+run record is finalized and the lock released by the engine, not by
+the exit-time SIGKILL; otherwise quit. Quitting means calling the session's
 `quit()`, never `process.exit` from inside a component. `rensa <chain>`
 starts on the detail screen.
 
@@ -278,20 +352,53 @@ actions so screens never test key codes:
 ```ts
 type Action = 'up' | 'down' | 'left' | 'right' | 'pageUp' | 'pageDown' | 'top' | 'bottom'
   | 'enter' | 'esc' | 'follow' | 'pause' | 'kill' | 'quit' | 'recheck'
-export function useKeys(handler: (a: Action, raw: { input: string; key: Key }) => void, opts?: { active?: boolean }): void
+type Focus = 'main' | 'input' | 'confirm'
+export function useKeys(handler: (a: Action | 'text', raw: { input: string; key: Key }) => void, opts: { active: boolean }): void
 ```
 
 Mapping: arrows; `shift+↑/↓` → pageUp/pageDown; `shift+←/→` → top/bottom;
 `fn` arrows arrive as pageUp/pageDown and are mapped the same; `enter`;
 `escape`; `ctrl+f` follow; `ctrl+p` pause; `ctrl+x` kill; `ctrl+c`
-quit; `ctrl+r` recheck. Anything else is passed through `raw` for text
-inputs. Ink runs with `exitOnCtrlC: false` so the app owns ctrl+c.
+quit; `ctrl+r` recheck. Anything else arrives as `'text'` with `raw`
+for the editing reducer. Ink runs with `exitOnCtrlC: false` so the app
+owns ctrl+c.
+
+### Focus: one `useInput` per screen
+
+Ink's `useInput` has no exclusive capture: every active hook receives
+every key, and the only control is each hook's `isActive`. So the
+rule is structural: **a screen mounts exactly one `useInput`, the one
+inside its `useKeys`**, and routes by a `focus` value it owns.
+`InputBox` mounts none (below). An app-level overlay (the quit
+confirmation) mounts its own `useKeys` and, while mounted, the active
+screen's `useKeys` is given `active: false`, so at any moment exactly
+one hook in the process is active. One key therefore produces one
+action, by construction rather than by convention.
+
+Routing inside a screen's handler, by `focus`:
+
+- `confirm` (a `y/n` line is showing): `y` performs the pending action,
+  `n` or `esc` cancels; every other key, including text, is ignored.
+- `input` (the screen's `InputBox` has focus): the control chords
+  `follow`, `pause`, `kill`, `quit`, `recheck` reach the screen as
+  usual, so a note being typed never blocks a pause; `esc` moves focus
+  to `main` and keeps the text; `enter` performs exactly one action,
+  the box's submit (step 13: start; step 14: note); everything else,
+  arrows included, goes to `editInput`.
+- `main`: the screen's navigation and its own `enter`; `esc` leaves the
+  screen; a `'text'` key that is a single printable character with no
+  modifier, on a screen whose input box is enabled, moves focus to
+  `input` and inserts the character, so typing just works without a
+  focus key.
+
+Screens never test `raw` themselves except for the `y`/`n` of a
+confirmation; everything else is an `Action` or a reducer call.
 
 ### Input priority over streams
 
 Keystrokes must land during token bursts. Stock Ink cannot set React
 lane priority, but the same effect falls out of how the two inputs
-reach the store: engine events are coalesced through the 50 ms batcher
+reach the store: engine events are coalesced through the one-frame batcher
 (`batch.ts`), key handling is not. Rules, for this step and every
 screen after it:
 
@@ -327,7 +434,7 @@ specified elsewhere in this step:
 |---|---|---|---|
 | discrete | keystrokes, paste | synchronous, never coalesced, never behind a throttle | "Input priority" above |
 | continuous | terminal resize | bounds applied immediately; wrap width settles after 50 ms quiet | "Sizing" above |
-| stream | engine `'event'` and `'transcript'` | batched into one `setState` per 50 ms window | `batch.ts` |
+| stream | the run handle's `event`, `transcript` and `delta` listeners | batched into one `setState` per frame (`FRAME_MS`) | `batch.ts` |
 
 The classes never share a queue: a resize does not flush the stream
 batcher, a keystroke does not wait for a width to settle, and a burst
@@ -354,14 +461,18 @@ to `RunHandle` in `src/engine/run/runner.ts`:
 interface RunHandle {
   // … step 08 …
   transcript(step: string, label: string): RingBuffer<TranscriptRecord>   // created on first use
-  partial(step: string, label: string): string | undefined               // current streaming line
+  partial(step: string, label: string): string | undefined               // deltas since the last record for the key, concatenated
 }
 ```
 
-The runner pushes every final record into the buffer and updates the
-partial slot *before* emitting `'transcript'`, so a consumer woken by
-the event reads a buffer that already holds it. The headless CLI keeps
-ignoring the buffers and printing from the event. Export `RingBuffer`
+`partial(step, label)` is the concatenation of every `delta` received
+for that key since its last record; it may span several lines. Any
+record for the key (`text`, `tool`, `note`) and the agent's `done`
+clear it to `undefined`. The runner pushes a record into the buffer
+and clears the slot *before* emitting `'transcript'`, and appends to
+the slot *before* emitting `'delta'`, so a consumer woken by either
+event reads state that already includes it. The headless CLI keeps
+ignoring the buffers and printing from `'transcript'`. Export `RingBuffer`
 and its type from `src/engine/index.ts`; the TUI never constructs one
 for a live run, only for the from-disk case in step 14.
 
@@ -402,18 +513,25 @@ export function useStore<S, T>(store: Store<S>, selector: (s: S) => T): T
 ## batch.ts
 
 ```ts
-export function createBatcher<T>(flush: (items: T[]) => void, ms = 50): { push(item: T): void; flushNow(): void; dispose(): void }
+export function createBatcher<T>(flush: (items: T[]) => void, ms = FRAME_MS): { push(item: T): void; flushNow(): void; dispose(): void }
 ```
 
-The 50 ms coalescing lives on the input side, on the `setState` calls
-driven by engine events, not on the store or on `subscribe`. The
-bridge pushes every engine event into a batcher; the first item in a
-quiet period flushes at once, items arriving within the next `ms`
-collect and flush together at the window's end as one `setState`.
-React therefore sees at most ~20 state changes per second however
-fast events stream, matching `maxFps: 20`, and the store stays a plain
-synchronous store whose notifications are never delayed or dropped.
-`flushNow` is for `dispose` and tests. No run or step knowledge here.
+The coalescing window is one frame, `FRAME_MS` from `frameRate.ts`
+(50 ms at 20 fps, 100 ms at 10), and it lives on the input side, on
+the `setState` calls driven by engine events, not on the store or on
+`subscribe`. The bridge pushes every engine event into a batcher; the
+first item in a quiet period flushes at once, items arriving within
+the next `ms` collect and flush together at the window's end as one
+`setState`. React therefore sees at most one state change per frame
+however fast events stream, so no state update is computed that Ink
+would never paint, and the store stays a plain synchronous store whose
+notifications are never delayed or dropped. The window is derived from
+`MAX_FPS` rather than written as a second number so that step 11b,
+which may lower the frame rate, changes one constant. The 50 ms
+resize-settle delay in `size.tsx` is unrelated: it is about layout
+stability during a drag, not paint rate, and does not move with the
+frame rate. `flushNow` is for `dispose` and tests. No run or step
+knowledge here.
 
 ## engineBridge.ts
 
@@ -428,7 +546,7 @@ interface RunState {
 }
 
 class RunView {
-  constructor(handle: RunHandle, engine: Engine, chainSteps: ReadonlyArray<{ id: string; kind: 'agent' | 'shell' }>)
+  constructor(handle: RunHandle, chainSteps: ReadonlyArray<{ id: string; kind: 'agent' | 'shell' }>)
   readonly store: Store<RunState>
   readonly events: RunEvent[]                                   // append-only, not in the store
   transcript(step: string, label: string): RingBuffer<TranscriptRecord>   // handle.transcript, or the from-disk buffer
@@ -437,9 +555,30 @@ class RunView {
 }
 ```
 
-- `store` starts as `{ progress: { status: 'running' }, steps: initialSteps(chainSteps), transcriptVersions: new Map() }`.
-- Engine `'event'` and `'transcript'` arrivals are pushed into one
-  batcher as a tagged union. The engine has already written the record
+- The constructor calls `handle.attach(...)` once and seeds the store
+  from what it returns, in the same synchronous step: `events` is the
+  returned history; `steps` is `reduceSteps(events, chainSteps)`;
+  `progress` is `reduceRun(events)`, then `applyResult(progress,
+  result)` when the snapshot carries a `result` (a run that ended
+  before the screen opened, including one that ended on a storage
+  failure and so has no `run.finished` event); `transcriptVersions` holds, for
+  every `(step, label)` the history mentions (`agent.spawned`, and
+  `shell` for each started shell step), `1 + handle.transcript(step,
+  label).length`, so the first paint already shows what the ring
+  buffers hold. Nothing starts as a hard-coded `running`: a run that
+  finished before the screen was opened renders finished on its first
+  frame, exactly as the from-disk case does. This is the only reason
+  `RunView` never misses `run.started` or a fast run's end, and it is
+  what makes leaving and re-entering a run screen safe: `dispose()`
+  detaches and drops the view, the handle keeps its history and
+  buffers, and the next `RunView` on the same handle rebuilds from
+  them.
+- The `event`, `transcript`, `delta` and `finished` listeners push
+  their arrivals into one batcher as a tagged union; `flush` applies a
+  `finished` item with step 08's `applyResult` after folding the
+  batch's events, so a storage failure reaches `progress` through the
+  same path as everything else and the screen always has a terminal
+  state to render. The engine has already written the record
   or delta into its buffer before emitting, so the bridge stores
   nothing; what the batcher defers is only the store update.
 - The batcher's `flush(items)` does one `setState(prev => …)` for the
@@ -458,8 +597,10 @@ class RunView {
 - `events` is kept outside the store because appending to it changes
   every time; nothing renders the raw list.
 - `step.finished` and `run.finished` arrive through `'event'` like
-  everything else; the bridge never awaits `handle.done` to learn
-  state.
+  everything else, and the end of a run that could not write
+  `run.finished` arrives through `finished`; the bridge never awaits
+  `handle.done`, because everything `done` carries also comes through
+  `attach`.
 - Step 14's finished-run-from-disk case builds the same `RunState` with
   `reduceSteps(events, chainSteps)` and `reduceRun(events)` over
   `readEvents`, fills its own `RingBuffer`s from `readTranscript`, and
@@ -494,24 +635,31 @@ export const Elapsed: React.FC<{ since: string; until?: string; color?: string }
   creates the file with only that helper; step 14 adds the rest).
   Nothing else in the UI polls.
 
-## InputBox.tsx
+## InputBox.tsx and editInput.ts
 
 ```ts
-export const InputBox: React.FC<{ value: string; onChange(v: string): void; onSubmit(v: string): void; placeholder?: string; active: boolean; width: number }>
+interface InputState { value: string; caret: number }
+export function editInput(state: InputState, raw: { input: string; key: Key }): InputState   // pure; editInput.ts
+export const InputBox: React.FC<{ state: InputState; onPaste(next: InputState): void; placeholder?: string; focused: boolean; enabled: boolean; width: number }>
 ```
 
 A one-row framed text input built on Ink 8 primitives, used by step
 13's input area and step 14's note box; `ink-text-input` is not a
-dependency. `useInput` for printable characters, backspace, delete,
-left/right, home/end (`active` false → the hook is inactive and the
-box renders dim); `usePaste` so a multi-line paste arrives as one
-change with newlines collapsed to spaces, instead of one `useInput`
-call per character; `useCursor` to place the terminal cursor at the
-caret so the terminal's own cursor is the caret (no painted caret
-character). Text longer than `width − 4` scrolls horizontally to keep
-the caret visible. `enter` calls `onSubmit` synchronously (the input
+dependency. It is **controlled and mounts no `useInput`**: the screen
+owns `InputState`, its `useKeys` handler calls `editInput` when focus
+is `input`, and the box only renders. `editInput` handles printable
+characters (inserted at the caret), backspace, delete, left/right,
+home/end, and returns the same object when a key changes nothing.
+Inside the box: `usePaste`, gated on `focused`, so a multi-line paste
+arrives as one `onPaste` with newlines collapsed to spaces instead of
+one key per character; `useCursor`, when `focused`, places the
+terminal cursor at the caret so the terminal's own cursor is the caret
+(no painted caret character). Text longer than `width − 4` scrolls
+horizontally to keep the caret visible. `enabled` false renders the
+box dim and the screen never gives it focus. Submit is not the box's
+concern: the screen handles `enter` in `input` focus (the input
 priority rules apply). `Frame` draws the border; the box paints no
-background unless it is the focused panel (step 14 rule D).
+background unless `focused` (step 14 rule D).
 
 ## main.ts wiring
 
@@ -523,7 +671,12 @@ the TUI branch matters:
 const opening = Engine.open(process.cwd())            // first: provider subprocesses start now
 const [engine, tui] = await Promise.all([opening, import('./tui/app.js')])
 const session = tui.start(engine, initialScreen, resolveMode(flags, process.env))   // registers restore, then render()
-await session.done                                     // resolves after quit(): unmount + waitUntilExit
+try {
+  await session.done                                   // resolves after any normal Ink exit; rejects on a React crash
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)   // primary screen: Ink has already restored it
+  process.exit(1)                                      // 'exit' runs step 06's registry: kill children, release lock
+}
 // only now: final diagnostics to stderr, if any
 ```
 
@@ -542,19 +695,51 @@ await session.done                                     // resolves after quit():
 - `open` rejecting (`NOT_A_REPO`) prints the error and exits 1 before
   anything is rendered, even if the Ink import already finished; no
   alternate screen is entered, so nothing needs restoring.
+- `done` rejecting is the React-crash path above. Without the
+  `process.exit(1)`, nothing would end the process: the engine's live
+  subprocesses keep the event loop alive and the run continues with no
+  UI. The exit runs step 06's registry through `'exit'`, which kills
+  the process group and releases the lock; the TUI's own restore
+  callback finds the record released and emits nothing. In fullscreen
+  mode Ink's error overview was drawn inside the alternate screen and
+  is gone by now, which is why `main.ts` prints the stack itself.
 - `open` resolves before the provider check completes. The app renders
   its first frame at once with `engine.providers()` undefined, and
   re-renders when the engine emits `'providers'`. Nothing in the TUI
   awaits `providersChecked`; step 12 specifies the checking state.
-- `patchConsole: false`: with the default, Ink intercepts `console.*`
-  and re-renders the frame to splice the output above it; one stray
-  `console.log` from a dependency during a token burst then stalls a
-  frame. With it off, such output goes straight to stdout (above the
-  inline frame; inside the alternate screen in fullscreen mode, where
-  it is overwritten on the next repaint), and nothing in `src/tui/` or
-  `src/engine/` calls `console.*` anyway: enable biome's `noConsole`
-  rule for those two directories in this step (step 01 did not), with
-  `src/cli/` exempt since the headless CLI writes to stdout on purpose.
+- `patchConsole: false`, and **nothing but Ink writes to the terminal
+  during a session.** Ink's incremental writer moves the cursor up by
+  the previous frame's height from where it assumes the cursor is and
+  skips lines equal to the previous frame's; a foreign write that ends
+  in a newline shifts the cursor, and the next repaint lands one row
+  off and never repairs the lines it considers unchanged. That holds in
+  the alternate screen too: nothing "overwrites it on the next
+  repaint". So Ink's own `patchConsole` is off (it would re-render the
+  frame to splice the output above it and stall a frame during a token
+  burst), and `startSession` installs its own capture for the three
+  sources of foreign output in this process, all routed to one
+  in-memory list:
+  - **engine diagnostics**: subscribe to step 07's `onDiag`;
+  - **`console.*`** from dependencies: replace `console.log`, `info`,
+    `warn`, `error`, `debug` with recorders that format the arguments
+    with `util.format` and store the line; restored in `quit()` and in
+    the fatal restore;
+  - **Node warnings** (`DeprecationWarning`, `ExperimentalWarning`,
+    `MaxListenersExceededWarning`): Node prints them from its own
+    default `'warning'` listener, so `process.removeAllListeners('warning')`
+    then `process.on('warning', record)`; a plain extra listener would
+    not stop the print.
+
+  Child processes are not a source: step 06 pipes all three stdio
+  streams, so a provider CLI's stderr never reaches the terminal.
+  After `quit()` has restored the terminal, `main.ts` writes the
+  captured lines to stderr when `RENSA_DEBUG=1` or when the session
+  ended on an error, else drops them; that is the "final diagnostics"
+  in the wiring above. Lint: enable biome's `noConsole` for
+  `src/engine/` and `src/tui/` in this step (step 01 did not), with
+  `src/cli/` exempt since the headless CLI writes to stdout on
+  purpose; `noConsole` does not see `process.stderr.write`, so the
+  test below covers that.
 
 ## Tests
 
@@ -564,7 +749,24 @@ await session.done                                     // resolves after quit():
   item. Runner: after a fake-provider run, `handle.transcript(step,
   label)` holds exactly the records `readTranscript` returns, in
   order, and the buffer held the record before the matching
-  `'transcript'` event fired (assert inside the listener).
+  `'transcript'` event fired (assert inside the listener);
+  `handle.partial(step, label)` equals the deltas received so far when
+  a `'delta'` listener runs, and is `undefined` when the following
+  `'transcript'` listener runs; a shell step's lines arrive as
+  `'transcript'` records under label `shell` and never as `'delta'`.
+- `RunView` (engineBridge): built on a handle whose fake run already
+  finished, the first `getState()` has `progress.status` of the final
+  status, every step's final state, and versions equal to buffer
+  lengths plus one; built immediately after `start`, the state shows
+  `run.started`'s timestamp and later events arrive through the
+  batcher; two `RunView`s on two concurrent fake runs never see each
+  other's events (assert `events` of each equals its own
+  `handle.events()` at the end); `dispose()` then a new `RunView` on
+  the same handle yields the same state as one that stayed attached;
+  on a handle whose run ended with a storage failure (step 08's test
+  setup), `getState().progress` is `failed` with the `STORAGE` error
+  although no `run.finished` event exists, both when attached before
+  and when built after the failure.
 - `store`: `setState` with an updater returning `prev` notifies no
   listener; with a new object it notifies each listener once;
   `unsubscribe` stops notifications; `useStore` with a selector
@@ -604,18 +806,44 @@ await session.done                                     // resolves after quit():
   the same props does not re-render the memoized leaf (render-count
   probe). `Spinner` changes frame across an `useAnimation` tick and
   unmounts cleanly.
-- `InputBox`: typing, backspace, home/end, a pasted `"a\nb"` arriving
-  as one `onChange('a b')`, `enter` calling `onSubmit` with the value,
-  a value longer than the width scrolling to keep the caret visible,
-  inactive box ignoring input.
-- `terminalSession` (unit): `done` is pending until `quit()` is called
-  and resolved after it; a second `quit()` returns the same promise and
-  unmounts once. `resolveMode` for each flag combination,
-  both flags → usage error, non-TTY → inline; the fatal restore with a
-  fake stdout/stdin and a stub instance: in fullscreen it calls
-  `unmount` first, then emits `?1049l`, `?25h`, `0m`, and a second
-  invocation emits nothing; in inline mode it never emits `?1049l`;
-  before `render` returned it emits nothing.
+- `editInput` (pure): typing at the caret, backspace, delete,
+  left/right at the ends, home/end, a key that changes nothing returns
+  the same object.
+- `InputBox`: a pasted `"a\nb"` while focused arrives as one `onPaste`
+  with `'a b'`; unfocused, the paste is ignored; a value longer than
+  the width scrolls to keep the caret visible; `enabled: false` renders
+  dim.
+- Focus routing, with a test screen that mounts `useKeys` and an
+  `InputBox`: in `main`, `left` is the screen's action and the input
+  state is unchanged; a printable key moves focus to `input` and
+  inserts it; in `input`, `left` moves the caret and the screen's
+  `left` handler is not called; `enter` calls the submit path exactly
+  once; `ctrl+p` in `input` reaches the screen; `esc` in `input`
+  returns to `main` without the screen's `esc` action; with an overlay
+  mounted, a `y` reaches only the overlay and the input text is
+  unchanged. `useInput` is mounted once per screen: assert with a
+  counter on a mocked `ink.useInput`.
+- `terminalSession` (unit): with a stub instance whose `waitUntilExit`
+  returns a controllable promise, `done` is pending until that promise
+  settles; resolving it resolves `done` without `quit()` having been
+  called; rejecting it rejects `done` with the same error, runs the
+  teardown once and marks the record released; a second `quit()`
+  returns the same promise and unmounts once. `resolveMode` for each
+  flag combination, both flags → usage error, non-TTY → inline. The
+  fatal restore, with a fake TTY stdout/stdin and `ink.render` mocked:
+  - fullscreen, stub `unmount` that writes `?1049l` and `?25h` to the
+    fake stdout as Ink does: the callback calls `unmount` first and
+    then writes nothing of its own, so the stream holds exactly one
+    `?1049l`; a second invocation emits nothing;
+  - fullscreen, stub `unmount` that throws: the callback writes
+    `?1049l`, `?25h`, `0m` itself, once;
+  - fullscreen, mocked `render` writes `?1049h` to the fake stdout and
+    then throws (a failure after Ink's constructor entered the screen):
+    the callback emits exactly one `?1049l` and `?25h`, and no `0m`
+    since nothing rendered;
+  - inline: it never emits `?1049l` in any of the above;
+  - `render` never called (startup failure before the TUI): it emits
+    nothing.
 - `terminalSession` (PTY, `test/e2e/tui-session.test.ts`, `node-pty`
   as a dev dependency, needs `npm run build`): each scenario runs the
   built CLI inside `sh -c '<cli> …; stty -a; echo __DONE__'` in a
@@ -623,19 +851,37 @@ await session.done                                     // resolves after quit():
   after exit. Scenarios, each in both modes unless noted: **normal
   quit** (send `esc`/`ctrl+c`), **accepted ctrl+c during a run**
   (fake chain, `ctrl+c` then `y`), **SIGTERM** (`process.kill(pid)`),
-  **startup failure** (run in a non-repo directory), **uncaught
-  exception** (`RENSA_CRASH=1`). Assertions: `stty -a` output contains
+  **startup failure** (run in a non-repo directory), **foreign
+  output** (`RENSA_CRASH=warn`: a `process.emitWarning` and a
+  `console.log` fired 300 ms after the first frame; the byte stream
+  between the first frame and the exit contains neither string, and
+  after exit with `RENSA_DEBUG=1` both appear on stderr), **render crash**
+  (`RENSA_CRASH=render`, a throw inside a component's render, which
+  Ink's error boundary catches), **uncaught exception**
+  (`RENSA_CRASH=timer`, a throw from a `setTimeout`, which reaches
+  step 06). Assertions: `stty -a` output contains
   `echo` and `icanon` (raw mode off); the byte stream contains
   `\x1b[?25h` after the last frame; in fullscreen the stream contains
   exactly one `\x1b[?1049h` and one `\x1b[?1049l`, and no header glyph
   `⎇` appears after `?1049l`; in inline mode `?1049h` never appears and
   no frame bytes follow the exit; the startup-failure case emits no
-  `?1049h` at all and the error is on the primary screen; the crash
-  case prints a readable stack after restoration. `SIGKILL` is not
-  tested; it has no guarantee.
+  `?1049h` at all and the error is on the primary screen; both crash
+  cases print a readable stack after restoration, exit 1, and leave no
+  `rensa` process behind (`__DONE__` arrives, so the process ended
+  rather than lingering with a dead UI). `SIGKILL` is not tested; it
+  has no guarantee.
 - `main.ts` has no static import of `src/tui/` or of `ink`: assert
   it with a small test that reads the file, or extend step 01's import
-  boundary lint with that rule, whichever is less code.
+  boundary lint with that rule, whichever is less code. The same test
+  asserts that no file under `src/engine/` or `src/tui/` contains
+  `process.stdout` or `process.stderr` except `terminalSession.ts`,
+  whose restore writes are the one sanctioned exception.
+- Output capture (unit, fake stdout/stderr): during a session a
+  `diag()` call, a `console.warn('x')` and
+  `process.emitWarning('y')` write nothing to either stream; after
+  `quit()` the three lines are in the session's captured list in
+  order; `console.warn` is the original function again and Node's
+  default `'warning'` listener count is back to what it was.
 - `render` is called with the five options above: assert on the
   options object passed to a mocked `ink.render`, in both modes.
 
@@ -650,11 +896,11 @@ background, quitting returns the previous screen contents intact. The
 first frame must appear before the provider line fills in; if the two
 arrive together, the provider check is being awaited somewhere before
 `render`. With the app open in each mode, `kill -TERM <pid>` from
-another terminal, and separately run it with `RENSA_CRASH=1` (a
-dev-only throw in `app.tsx` behind that variable, removed before step
-17): every time the shell prompt comes back with echo and a visible
-cursor on the primary screen, and the crash prints a readable stack
-there. Note any flicker or tearing seen in fullscreen while a
+another terminal, and separately run it with `RENSA_CRASH=render` and
+with `RENSA_CRASH=timer` (dev-only throws in `app.tsx` behind that
+variable, removed before step 17): every time the shell prompt comes
+back with echo and a visible cursor on the primary screen, the crash
+prints a readable stack there, and `ps` shows no `rensa` left running. Note any flicker or tearing seen in fullscreen while a
 transcript streams; step 11b is where that observation is recorded and
 decided on.
 
