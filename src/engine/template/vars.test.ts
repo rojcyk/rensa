@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type TmpDir, tmpDir } from '../../testing/tmpRepo.js'
 import type { VarSpec } from '../config/types.js'
 import { RensaError } from '../errors.js'
+import { childEnv } from '../process/env.js'
+import { liveProcessGroups } from '../process/spawn.js'
 import type { Namespace, StepResult } from './namespace.js'
 import { evaluateVars } from './vars.js'
 
@@ -416,5 +418,56 @@ describe('evaluation order', () => {
     await catchRensa(evaluateVars(vars, namespace(), dir.dir))
 
     expect(existsSync(path.join(dir.dir, 'later.txt'))).toBe(false)
+  })
+})
+
+describe('shell var environment', () => {
+  const vars = { key: shell('printf \'%s\' "$ANTHROPIC_API_KEY"') }
+
+  beforeEach(() => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-api03-9d41e7c2')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('hides ANTHROPIC_API_KEY from the command when the env is built without allowApiKeys', async () => {
+    const env = childEnv(process.env, { allowApiKeys: false })
+
+    expect(await evaluateVars(vars, namespace(), dir.dir, env)).toEqual({ key: '' })
+  })
+
+  it('passes ANTHROPIC_API_KEY to the command when the env is built with allowApiKeys', async () => {
+    const env = childEnv(process.env, { allowApiKeys: true })
+
+    expect(await evaluateVars(vars, namespace(), dir.dir, env)).toEqual({
+      key: 'sk-ant-api03-9d41e7c2',
+    })
+  })
+})
+
+describe('shell var process groups', () => {
+  it('registers the command group while it runs and drops it once evaluateVars resolves', async () => {
+    // The shell is the group leader, so its $$ is the pgid. It waits for
+    // the test to create `release` before it exits.
+    const command =
+      "printf '%s' $$ > pgid.txt; while [ ! -e release ]; do sleep 0.05; done; printf 'released'"
+    const pending = evaluateVars({ gate: shell(command) }, namespace(), dir.dir)
+    const pgid = await vi.waitFor(async () => {
+      const text = await readFile(path.join(dir.dir, 'pgid.txt'), 'utf8')
+      assert(/^\d+$/.test(text), `pgid.txt holds ${JSON.stringify(text)}`)
+      return Number(text)
+    })
+    const registeredWhileRunning = liveProcessGroups.has(pgid)
+
+    await writeFile(path.join(dir.dir, 'release'), '')
+    const values = await pending
+
+    expect([registeredWhileRunning, values, liveProcessGroups.has(pgid)]).toEqual([
+      true,
+      { gate: 'released' },
+      false,
+    ])
   })
 })

@@ -218,7 +218,7 @@ render(<App mode={mode} />, {
   `rendered`. Each write clears its flag so a second run emits nothing.
   Because step 06's registry runs callbacks LIFO and this one is
   registered last (after the engine's), the terminal is sane before
-  children are killed, the lock is released, and the uncaught
+  children are signalled, the lock is released, and the uncaught
   exception's stack is printed by the registry's handler.
 - **`SIGKILL`** has no guarantee; say so in the README (step 17).
 

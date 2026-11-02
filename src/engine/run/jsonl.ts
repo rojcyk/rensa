@@ -2,9 +2,9 @@ import { appendFile } from 'node:fs/promises'
 import { RensaError } from '../errors.js'
 
 /**
- * Appends lines to one file in order, one `appendFile` per line, never two
- * at once. `push` returns immediately; `flush` waits for the queue to
- * drain. After a failed write the remaining lines are dropped and every
+ * Appends lines to one file in order, never two writes at once; lines
+ * pushed while a write is in flight go out together in the next one.
+ * `push` returns immediately; `flush` waits for the queue to drain. After a failed write the remaining lines are dropped and every
  * later `flush` rejects with that error: writing past a gap would leave a
  * file that reads as complete.
  */
@@ -41,8 +41,12 @@ export class AppendQueue {
   private async drain(): Promise<void> {
     try {
       await this.prepare()
-      for (let line = this.pending.shift(); line !== undefined; line = this.pending.shift()) {
-        await appendFile(this.file, line)
+      // Everything pushed while the previous write was in flight goes out
+      // as one write, so a burst of lines costs one syscall, not one each.
+      while (this.pending.length > 0) {
+        const batch = this.pending.join('')
+        this.pending = []
+        await appendFile(this.file, batch)
       }
     } catch (err) {
       this.failure = err

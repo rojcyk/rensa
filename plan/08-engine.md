@@ -139,8 +139,15 @@ with `O_EXCL`; if the file exists and its pid is alive
 message; if the pid is dead, replace it. Release on `run.finished`,
 and on process death through step 06's `onShutdown`, never through a
 `process.on('exit')` of its own: the shutdown module is the single
-ordered place for that, so the TUI's terminal restore runs before this
-callback and the child kill runs between them. Register once at module
+ordered place for that, so the TUI's terminal restore runs first, the
+child kill second and this callback last. Callbacks run LIFO, so this
+one must be registered before `spawn.ts`'s kill: add
+`import './run/lock.js'` as the first line of `src/engine/index.ts`,
+above the existing `import './process/spawn.js'`, and keep `lock.ts`
+free of any import that reaches `process/spawn.js` (see step 06). This
+orders the signal, not the death: the kill callback sends `SIGKILL`
+and returns without waiting, so children are signalled, not
+necessarily gone, when the lock is released. Register once at module
 load (so the registration precedes the TUI's, see step 06), with a
 module-level set of held lock paths; the callback `unlinkSync`s each
 one, ignoring `ENOENT`. `acquire` adds to the set, `release` removes
@@ -569,6 +576,18 @@ terminal state in memory, whatever the disk did.
 - Lock on shutdown: acquire a lock, call step 06's `runShutdown()`, the
   lock file is gone. In its own test file (`lock.shutdown.test.ts`),
   for the same reason as step 06's shutdown test.
+- Shutdown order, extending step 06's `shutdown.order.test.ts`:
+  import `src/engine/index.js`, acquire a lock, spawn a `sleep 30`,
+  register a probe through `onShutdown` (standing in for the TUI's
+  terminal restore), and wrap `process.kill` with a call-through spy
+  that, on `SIGKILL` to the child's negative pgid, records whether the
+  lock file exists. Call `runShutdown()` and assert the actual order:
+  the probe ran first and saw the child not yet a zombie (step 06's
+  `ps -o stat=` probe, not `process.kill(-pgid, 0)`, which a zombie
+  still answers) and the lock file present; the `SIGKILL` was sent while the lock file still
+  existed; after `runShutdown()` the lock file is gone and `ps` shows
+  no `sleep`. Do not assert that the child had exited before the lock
+  was released; the hook does not wait for that.
 - Headless with pauses refuses without `noPause`, runs with it.
 - Late attach: start a fake run, await `done`, then `attach`: the
   returned history equals `readEvents` on the file, `run.started`

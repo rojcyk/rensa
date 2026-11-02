@@ -85,8 +85,10 @@ class EventLog extends EventEmitter {
 export async function readEvents(path: string): Promise<RunEvent[]>
 ```
 
-- One in-memory queue, one writer loop, `fs.promises.appendFile` per
-  line, never concurrent. `append` is synchronous from the caller's
+- One in-memory queue, one writer loop, never concurrent. Each
+  `fs.promises.appendFile` writes every line queued since the previous
+  write, in order. One call per line made a 100,000-line shell step
+  take 6.6 s to flush output that the command produced in 24 ms. `append` is synchronous from the caller's
   view and returns the completed event so the caller can emit it.
 - `seq` starts at 1 with no gaps. `t` is `new Date().toISOString()`.
 - `readEvents` tolerates a truncated final line (drops it) and skips

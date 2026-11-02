@@ -95,17 +95,34 @@ order would be accidental and a throw in one would skip the rest.
   cleaned up on the normal path (a released lock, a child that exited)
   can drop its callback.
 
-Registration order is what makes the exit sequence deterministic.
-Engine modules register at module evaluation, not lazily: `spawn.ts`
-registers the child kill below and step 08's `lock.ts` registers the
-lock release, both at top level. `src/engine/index.ts` imports
-`process/spawn.js` before `run/lock.js` so the kill callback is
-registered first, and re-exports `onShutdown` and `onInterrupt` so
-consumers never import from `process/` directly. The TUI registers
-its terminal restore in `startSession` (`src/tui/terminalSession.ts`,
-step 11), which `main.ts` calls after the engine has been imported and
-opened, so it is always the last registration. LIFO then yields:
-terminal restore, kill live children, release lock.
+Registration order is what makes the exit sequence deterministic. The
+intended sequence at exit is: restore the terminal, signal live
+children (`SIGKILL` to their groups), release the lock. Callbacks run
+LIFO, so they must be registered in the reverse of that: lock release
+first, child kill second, terminal restore last.
+
+Engine modules register at module evaluation, not lazily: step 08's
+`lock.ts` registers the lock release and `spawn.ts` registers the
+child kill below, both at top level. ES modules evaluate in import
+order, depth first, so `src/engine/index.ts` begins with two
+side-effect imports in this order: `import './run/lock.js'` (added by
+step 08), then `import './process/spawn.js'`. `lock.ts` must not
+import `process/spawn.js`, directly or through any module it imports,
+or the kill would register first. Until step 08 exists, `index.ts`
+carries only the `spawn.js` import, with a comment saying the lock
+import goes above it. `index.ts` re-exports `onShutdown` and
+`onInterrupt` so consumers never import from `process/` directly. The
+TUI registers its terminal restore in `startSession`
+(`src/tui/terminalSession.ts`, step 11), which `main.ts` calls after
+the engine has been imported and opened, so it is always the last
+registration and runs first.
+
+The guarantee is "children are signalled before the lock is
+released", not "children have exited before the lock is released":
+the hook is synchronous and runs inside `'exit'`, so it sends
+`SIGKILL` and moves on without waiting for the children to die. A
+second `rensa` that acquires the lock in that instant may briefly
+overlap a dying child.
 
 ## env.ts
 
@@ -166,9 +183,15 @@ export function spawnProcess(opts: SpawnOptions): Child
   Idempotent: a second `kill()` neither re-sends SIGTERM nor restarts
   the timer.
 - Live-groups registry: a module-level `Set<number>` of pgids. Add on
-  spawn. Remove only when `result` has settled **and** `groupAlive`
-  is false; if the group is still alive when `result` settles (an
-  escaped member), leave it registered. At module load, register one
+  spawn. When `result` settles, by any path including the forced one
+  below, apply one rule: if `groupAlive` is false, remove the pgid; if
+  it is true (a member that closed its pipes and kept running, or one
+  not yet reaped), keep it and recheck every second on an `unref`'d
+  timer, removing it once the group is gone. A forced settle says only
+  that something still held the pipes, possibly a process that left the
+  group and that this pgid cannot reach; it says nothing about whether
+  the group exists, and keeping a vanished pgid registered would let a
+  reused pgid be killed at shutdown. At module load, register one
   callback through `onShutdown` that sends `SIGKILL` to every group
   still in the set (`process.kill(-pid, 'SIGKILL')`, ignoring `ESRCH`).
   No `SIGTERM`, no grace period: this path runs inside `'exit'`, where
@@ -304,15 +327,30 @@ export async function runShellStep(opts: {
   `kill()`, when the leader was already gone but the grandchild was
   not.
 - Escaped member holding the pipes, `escalateMs: 200`: a leader that
-  starts `setsid sleep 30` (Linux) or `perl -e 'setsid; exec "sleep",
-  30'` (both platforms) sharing stdout, then exits. After `kill()`,
-  `result` resolves within about 400 ms with `killed: true` even though
-  a writer still holds the pipe; the pgid stays in the registry; the
-  test then kills the escaped `sleep` itself.
+  starts `perl -MPOSIX -e 'POSIX::setsid(); exec "sleep", 30'` sharing
+  stdout, then exits. (Bare `perl -e 'setsid; …'` without POSIX is a
+  no-op bareword: the `sleep` stays in the group and dies with it, so
+  the test would prove nothing. Assert with `ps -o pgid=` that the
+  `sleep`'s pgid differs from the leader's.) After `kill()`, `result`
+  resolves within about 400 ms with `killed: true` even though a writer
+  still holds the pipe; the original pgid is no longer in the registry,
+  because that group is gone; the test then kills the escaped `sleep`
+  itself.
 - Shutdown kill: spawn a `sleep 30`, call `runShutdown()`, check with
   `ps` that the child is gone. Because `runShutdown` is once-only per
   process, this test runs in its own file (`spawn.shutdown.test.ts`)
   so vitest gives it its own worker.
+- Registration order, consumer before kill: in its own file
+  (`shutdown.order.test.ts`), import `src/engine/index.js`, spawn a
+  `sleep 30`, then register a probe through the re-exported
+  `onShutdown` (standing in for the TUI's terminal restore) that
+  reads the child leader's state with a synchronous `ps -o stat=`.
+  Call `runShutdown()`: the probe saw a running or sleeping state
+  (`/^[SRI]/`), not a zombie (`Z`), and afterwards `ps` shows no
+  `sleep`. Do not probe with `process.kill(-pgid, 0)`: a child already
+  SIGKILLed cannot be reaped while synchronous code runs, stays a
+  zombie, and still answers the probe, so the check could not fail.
+  Step 08 extends this file with the lock.
 - `runShellStep`: exit code mapping, output file content equals combined
   lines, `onLine` called in order.
 

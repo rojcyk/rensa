@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process'
 import type { VarSpec } from '../config/types.js'
 import { RensaError } from '../errors.js'
+import { childEnv } from '../process/env.js'
+import { type KillSignal, type SpawnResult, spawnProcess } from '../process/spawn.js'
 import { lookup, type Namespace } from './namespace.js'
 import { render, renderForShell, type ShellBinding } from './render.js'
 
@@ -15,20 +16,33 @@ const STDERR_MAX_BYTES = STDERR_CHARS * 4
  * Evaluates a step's vars in declaration order. Placeholders inside
  * literals and shell commands render against the namespace only; in a
  * shell command they reach the shell as data, never as code.
+ *
+ * `env` is the base environment for shell commands, built with
+ * `childEnv()` by the caller, who decides `allowApiKeys`; left out, the
+ * API keys are stripped. `signal` lets an abort end a running command.
  */
 export async function evaluateVars(
   vars: Record<string, VarSpec>,
   ns: Namespace,
   cwd: string,
+  env: NodeJS.ProcessEnv = childEnv(process.env, { allowApiKeys: false }),
+  signal?: KillSignal,
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {}
   for (const [name, spec] of Object.entries(vars)) {
-    out[name] = await evaluate(name, spec, ns, cwd)
+    out[name] = await evaluate(name, spec, ns, cwd, env, signal)
   }
   return out
 }
 
-async function evaluate(name: string, spec: VarSpec, ns: Namespace, cwd: string): Promise<unknown> {
+async function evaluate(
+  name: string,
+  spec: VarSpec,
+  ns: Namespace,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  signal: KillSignal | undefined,
+): Promise<unknown> {
   switch (spec.kind) {
     case 'literal':
       return render(spec.value, {}, ns)
@@ -40,77 +54,68 @@ async function evaluate(name: string, spec: VarSpec, ns: Namespace, cwd: string)
       return value
     }
     case 'shell':
-      return runShell(name, renderForShell(spec.value, ns), cwd)
+      return runShell(name, renderForShell(spec.value, ns), cwd, env, signal)
   }
 }
 
-// TODO(step 06): pass childEnv() instead of process.env.
-function runShell(
+async function runShell(
   name: string,
-  { script, env, display: command }: ShellBinding,
+  { script, env: bindings, display: command }: ShellBinding,
   cwd: string,
+  env: NodeJS.ProcessEnv,
+  signal: KillSignal | undefined,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-c', script], {
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // Own process group, so a timeout also kills what the shell forked.
-      detached: true,
-    })
-    // Set when rensa kills the group. Exit code 0 can still follow, from
-    // a shell that exited while a background child held its pipes.
-    let killedFor: string | undefined
-    const killGroup = (why: string) => {
-      killedFor = why
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
-      } catch {
-        // The group is already gone.
-      }
-    }
-    const timer = setTimeout(
-      () => killGroup(`timed out after ${SHELL_TIMEOUT_MS / 1000} s`),
-      SHELL_TIMEOUT_MS,
-    )
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    let stdoutBytes = 0
-    let stderrBytes = 0
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (killedFor !== undefined) return
+  const stdout: Buffer[] = []
+  const stderr: Buffer[] = []
+  let stdoutBytes = 0
+  let stderrBytes = 0
+  // Set when the evaluator kills the command for printing too much.
+  let overflow: string | undefined
+  const child = spawnProcess({
+    argv: ['/bin/sh', '-c', script],
+    cwd,
+    // The bindings carry placeholder values to the shell as data.
+    env: { ...env, ...bindings },
+    timeoutMs: SHELL_TIMEOUT_MS,
+    onStdoutChunk: (chunk) => {
+      if (overflow !== undefined) return
       stdoutBytes += chunk.length
       if (stdoutBytes > STDOUT_MAX_BYTES) {
-        killGroup(`printed more than ${STDOUT_MAX_BYTES / 1024 / 1024} MiB`)
+        overflow = `printed more than ${STDOUT_MAX_BYTES / 1024 / 1024} MiB`
+        child.kill()
         return
       }
       stdout.push(chunk)
-    })
-    child.stderr.on('data', (chunk: Buffer) => {
+    },
+    onStderrChunk: (chunk) => {
       if (stderrBytes >= STDERR_MAX_BYTES) return
       stderrBytes += chunk.length
       stderr.push(chunk)
-    })
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      reject(
-        new RensaError('TEMPLATE', `var \`${name}\`: cannot run \`${command}\`: ${err.message}`),
-      )
-    })
-    child.on('close', (code, signal) => {
-      clearTimeout(timer)
-      if (code === 0 && killedFor === undefined) {
-        resolve(Buffer.concat(stdout).toString('utf8').replace(/\n$/, ''))
-        return
-      }
-      const why = killedFor ?? (signal ? `was killed by ${signal}` : `exited with ${code}`)
-      const err = Buffer.concat(stderr).toString('utf8').slice(0, STDERR_CHARS)
-      reject(
-        new RensaError(
-          'TEMPLATE',
-          `var \`${name}\`: \`${command}\` ${why}${err ? `: ${err}` : ''}`,
-        ),
-      )
-    })
+    },
   })
+  const dropKill = signal?.onKill(() => child.kill())
+  let result: SpawnResult
+  try {
+    result = await child.result
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    throw new RensaError('TEMPLATE', `var \`${name}\`: cannot run \`${command}\`: ${why}`)
+  } finally {
+    dropKill?.()
+  }
+  // Exit code 0 can follow a kill, from a shell that exited while a
+  // background child held its pipes.
+  if (result.exitCode === 0 && !result.killed && !result.timedOut) {
+    return Buffer.concat(stdout).toString('utf8').replace(/\n$/, '')
+  }
+  const why = overflow ?? failure(result)
+  const err = Buffer.concat(stderr).toString('utf8').slice(0, STDERR_CHARS)
+  throw new RensaError('TEMPLATE', `var \`${name}\`: \`${command}\` ${why}${err ? `: ${err}` : ''}`)
+}
+
+function failure({ timedOut, signal, killed, exitCode }: SpawnResult): string {
+  if (timedOut) return `timed out after ${SHELL_TIMEOUT_MS / 1000} s`
+  if (signal) return `was killed by ${signal}`
+  if (killed) return 'was killed'
+  return `exited with ${exitCode}`
 }
