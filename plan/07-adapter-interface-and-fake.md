@@ -95,6 +95,7 @@ interface Adapter {
   capabilities(): Capabilities
   available(env: NodeJS.ProcessEnv): Promise<Availability>
   spawn(req: SpawnRequest): AgentProcess
+  parse: Parser                       // (lines: AsyncIterable<string>) => AsyncIterable<AgentEvent>
 }
 ```
 
@@ -102,6 +103,37 @@ Rules every adapter follows:
 
 - Exactly one `done` event, always last, even after `kill()` or a
   spawn failure (then `exitCode: null`, `error.kind: 'exit'`).
+- `spawn()` owns that final `done`; `parse` does not. `parse` sees only
+  stdout, so its own `done` is provisional: `reply`, `usage` and
+  `sessionId` from the stream, `exitCode` as the stream reports it (null
+  when it carries none, the usual case), `error` classified from stdout
+  alone. When `done` is produced is the parser's choice: on a final
+  event (Claude's `result`) or at end of input (Codex, step 16). End of
+  input is not an error in itself; `no_output` means the provider's own
+  completion evidence is missing, and each adapter step names that
+  evidence: Claude's `result` event, the fake's `done` line, Codex's
+  `turn.completed`.
+  `spawn()` forwards every parser event except that `done`, holds it,
+  keeps stderr lines for classification (optionally emitting them as
+  `raw` prefixed `stderr: `), and once both the parser has ended and the
+  process result is in, emits one `done`: `reply`, `usage`, `sessionId`
+  from the parser's; `exitCode` from the process (null when signalled or
+  never started); `error` by the first rule that applies:
+  1. the process never started → `exit`, the spawn error's message;
+  2. killed, by `kill()` or by `timeoutMs` → `exit`, `killed` or
+     `timed out`;
+  3. the parser reported an error → that error, refined from stderr: a
+     parser `no_output` or `exit` becomes `auth` or `usage_limit` when
+     stderr shows one, with the matching stderr line as the message; a
+     parser `auth` or `usage_limit` stands. Example: empty stdout and
+     `Error: not logged in` on stderr → the parser says `no_output`, the
+     final `done` says `auth`;
+  4. non-zero exit → classified from stderr, else `exit` with the last
+     stderr line as the message;
+  5. otherwise none.
+
+  The fake has no process, so its parser's `done` is final unless
+  `kill()` replaces it (rule 2).
 - `raw` is emitted for every line before any other event derived from
   it, so `raw.jsonl` is complete.
 - `delta` carries only new text, for display while a block streams; the
@@ -175,8 +207,18 @@ test/fixtures/<provider>/<name>/
   raw.jsonl          the provider's stdout, one line per line, as captured
   transcript.jsonl   the expected normalized records (step 05 format)
   reply.md           the expected final reply
-  done.json          the expected `done` event minus `reply`
+  done.json          the parser's expected `done` minus `kind` and `reply`
 ```
+
+`done.json` holds the remaining fields only (`exitCode`, and `usage`,
+`error`, `sessionId` when present), e.g.
+`{ "exitCode": null, "usage": { "input": 240, "output": 42 } }`. It is
+parsed strictly: `kind`, `reply` or any unknown key is an error, since
+`kind` is always `done` and the reply lives in `reply.md`. A fixture pins
+`parse`, not `spawn`, so `done.json` is the parser's provisional `done`
+(see the rules above), not the one `spawn()` reconciles with the process:
+for a real provider its `exitCode` is normally `null`, and a capture
+tool must write the parser's `done`, never the final one.
 
 Fixtures for real providers are captured from real runs (steps 10, 15,
 16 describe how); the `fake` fixture under `test/fixtures/fake/hello/`

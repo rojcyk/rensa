@@ -62,8 +62,12 @@ or similar; step 07's union, no `partial` flag);
 `command_execution` and `file_change` completed → `tool` with `name`
 `Bash` or `Edit`, `input` from the item, `ok` from its status, `output`
 from its captured output; `turn.completed` → `usage`; end of stream →
-`done` with the last `agent_message` as reply. Error classification
-from observed usage-limit and auth messages.
+`done` with the last `agent_message` as reply. Producing `done` at end
+of stream is the intended design, not an early end: Codex's completion
+evidence is `turn.completed` (confirm against the capture), and only a
+stream without it gets `no_output` (step 07). Error classification
+from observed usage-limit and auth messages; `spawn` refines a parser
+`no_output` or `exit` from stderr per step 07's rule 3.
 
 Minimum fixtures: `codex/read-only-hello`, `codex/tool-calls`.
 

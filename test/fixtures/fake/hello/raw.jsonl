@@ -1,0 +1,9 @@
+{"type":"delta","text":"Hello"}
+{"type":"delta","text":", I will look at the README."}
+{"type":"text","text":"Hello, I will look at the README."}
+{"type":"tool","name":"Read","input":{"path":"README.md"},"ok":true,"output":"# rensa\n"}
+{"type":"usage","input":120,"output":18}
+{"type":"delta","text":"The README is a single heading."}
+{"type":"text","text":"The README is a single heading."}
+{"type":"usage","input":240,"output":42,"cache_read":100}
+{"type":"done","exit":0}

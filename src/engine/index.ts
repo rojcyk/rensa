@@ -6,6 +6,8 @@
 // must not import process/spawn.js, directly or transitively.
 import './process/spawn.js'
 
+export type { ProviderStatus } from './adapters/available.js'
+export type { AgentProcess, Availability, Capabilities } from './adapters/types.js'
 export { type ChainFile, type Discovered, discover, ensureProjectDir } from './config/discover.js'
 export { EFFORT } from './config/effort.js'
 export { loadAllChains, loadChain } from './config/index.js'
@@ -23,6 +25,7 @@ export type {
   VarSpec,
 } from './config/types.js'
 export { validateWithAdapters } from './config/validate.js'
+export { type DiagEntry, diag, drainDiag, onDiag } from './diag.js'
 export { RensaError, type RensaErrorCode } from './errors.js'
 export { onInterrupt, onShutdown } from './process/shutdown.js'
 export { type AgentFileName, openRunDir, type RunDir } from './run/dir.js'

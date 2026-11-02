@@ -108,17 +108,18 @@ Input: raw stdout lines. Each line is a JSON object with `type`. Emit
 | `type: result` | `done` (below) |
 | anything else | ignore |
 
-`done`: `reply = result.result ?? ''`; `exitCode` from the process;
+The parser's `done` is provisional (step 07): `reply = result.result ?? ''`;
+`exitCode: null` (the stream does not carry it; `spawn` fills it in);
 `usage` from `result.usage` → `{ input: input_tokens, output: output_tokens, cache_read: cache_read_input_tokens, context: <input tokens of the last assistant message usage if present> }`;
-`error` when `result.subtype !== 'success'` or the process exited
-non-zero:
+`sessionId` is not set (Claude uses the id rensa passes);
+`error` when `result.subtype !== 'success'`, from stdout only:
 
 - reply matching `/usage limit|hit your .* limit|resets/i` → `usage_limit`
-- reply or stderr matching `/not logged in|auth|login/i` → `auth`
+- reply matching `/not logged in|auth|login/i` → `auth`
 - no `result` event at all → `no_output`
 - else `exit`
 
-`message` is the reply text when present, else the last stderr line.
+`message` is the reply text.
 
 Non-JSON lines (warnings, progress) are emitted as `raw` only.
 
@@ -127,14 +128,22 @@ Non-JSON lines (warnings, progress) are emitted as `raw` only.
 Wires `spawnProcess` (step 06) with `argv`, `cwd`, `env`, stdin
 message, timeout; pipes stdout lines into `parse`; stderr lines are
 emitted as `raw` prefixed with `stderr: ` and kept for error
-classification. `kill()` delegates. Guarantees exactly one `done`.
+classification. `kill()` delegates. Holds the parser's `done` and emits
+the one final `done` by step 07's reconciliation rules: `exitCode` from
+the process; for errors, a stderr line matching
+`/not logged in|auth|login/i` turns a parser `no_output` or `exit`, or
+an unexplained non-zero exit, into `auth` with that line as `message`
+(so empty stdout plus "not logged in" on stderr is `auth`, not
+`no_output`); otherwise a non-zero exit without a parser error is
+`exit` with the last stderr line as `message`.
 
 ## Fixture capture
 
 Add a dev command `rensa capture <provider> <name> "<prompt>"` (dev
 only, `RENSA_DEV=1`) that runs the adapter in the current directory
 with `tools: read`, writes `raw.jsonl`, the parsed `transcript.jsonl`,
-`reply.md`, `done.json`, and `meta.json` into
+`reply.md`, `done.json` (the parser's `done` minus `kind` and `reply`,
+not the final reconciled one; step 07), and `meta.json` into
 `test/fixtures/<provider>/<name>/`. Capture at least:
 
 - `claude/read-only-hello`: "List the files in this directory and say hello."
