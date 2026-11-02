@@ -1,0 +1,13 @@
+description: A registry entry copied by from in two steps.
+agents:
+  reviewer:
+    provider: fake
+    tools: read
+    prompt: agents/reviewer.md
+steps:
+  - id: first-pass
+    prompt: steps/review.md
+    agents: [{ from: reviewer }]
+  - id: second-pass
+    prompt: steps/summarize.md
+    agents: [{ from: reviewer }]

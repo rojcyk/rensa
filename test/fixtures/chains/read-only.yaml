@@ -1,0 +1,5 @@
+description: One read-only agent step.
+steps:
+  - id: review
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]

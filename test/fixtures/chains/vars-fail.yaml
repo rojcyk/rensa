@@ -1,0 +1,10 @@
+description: A var command that fails on a continue step.
+steps:
+  - id: prep
+    prompt: steps/with-context.md
+    agents: [{ provider: fake, tools: read }]
+    on_fail: continue
+    vars:
+      context: $(exit 3)
+  - id: later
+    run: echo later

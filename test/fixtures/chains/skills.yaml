@@ -1,0 +1,19 @@
+description: Skills on a named agent and on from copies of it.
+agents:
+  skilled:
+    provider: fake
+    tools: read
+    skills: [skills/conventions, ~/rensa-skills/outside]
+steps:
+  - id: first
+    prompt: steps/review.md
+    agents: [skilled]
+  - id: second
+    prompt: steps/summarize.md
+    agents: [skilled]
+  - id: third
+    prompt: steps/review.md
+    agents: [{ from: skilled }]
+  - id: fourth
+    prompt: steps/summarize.md
+    agents: [{ from: skilled }]

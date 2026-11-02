@@ -1,0 +1,8 @@
+description: A shell step that outlives its timeout.
+steps:
+  - id: slow
+    run: sleep 5.6461
+    timeout: 1s
+  - id: report
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]

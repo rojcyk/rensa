@@ -109,20 +109,35 @@ Preconditions, each a `RensaError` thrown before anything is written:
 - chain has pauses and `opts.noPause` is false and the caller is
   headless: the CLI passes `opts.headless: true`; the engine throws
   `CONFIG_INVALID` with hint "pass --no-pause"
-- if `chain.writes`: `git status --porcelain` must be empty
-  (`DIRTY_TREE`), and the repo lock must be acquired (`LOCKED`)
+- if `chain.writes`: `git status --porcelain --untracked-files=all`
+  must be empty (`DIRTY_TREE`), and the repo lock must be acquired
+  (`LOCKED`). The status excludes rensa's own lock files with the
+  pathspec `:(exclude,top,glob).rensa/lock*` (the lock, `lock.recover`
+  and their temporary files): `.rensa/.gitignore` lists only `runs/`,
+  so without the exclusion a held or stale lock would make the tree
+  dirty, a second start would fail `DIRTY_TREE` instead of `LOCKED`,
+  and a stale lock could never be replaced.
+- `base` names a commit (`CONFIG_INVALID`, hint "pass an existing
+  branch, tag or sha as the base"); a ref starting with `-` is refused
+  before git sees it
 
 Then:
 
 1. Resolve `base`: `opts.base`, else chain, else current ref
    (`git symbolic-ref --short HEAD`, falling back to `git rev-parse
    HEAD`). Record `base_sha` with `git rev-parse <base>`.
-2. Create the run id and directory, write `run.json`, create the
-   `EventLog`, emit `run.started`.
+2. Create the run id, acquire the lock with it (for `writes` chains),
+   and create the run directory. On `EEXIST` from the directory,
+   release the lock and retry with a fresh id, up to 5 times. Then
+   write `run.json`, create the `EventLog`, emit `run.started`. A
+   failure in any of these releases the lock and throws
+   `RensaError('STORAGE')` (a code added to `RensaErrorCode` for this
+   and for the `RunResult` error) with the path and the storage hint.
 3. Return a `RunHandle` immediately; execution continues asynchronously.
    `handle.done` resolves with the `RunResult` (below) and never
    rejects: chain-level errors become `run.finished { failed }` plus a
-   result, and storage errors become a result alone.
+   result carrying the error, and storage errors that keep
+   `run.finished` off disk become a result alone (see Finish).
 
    `run.started` has already been emitted when the handle is returned,
    and nothing stops the runner from emitting more before the caller's
@@ -133,10 +148,45 @@ Then:
 
 ## lock.ts
 
-`<repo>/.rensa/lock` containing `{ pid, run_id, started_at }`. Acquire
-with `O_EXCL`; if the file exists and its pid is alive
-(`process.kill(pid, 0)`), throw `LOCKED` with the run id in the
-message; if the pid is dead, replace it. Release on `run.finished`,
+`<repo>/.rensa/lock` containing `{ pid, token, run_id, started_at }`,
+where `token` is a random UUID unique to each acquisition.
+
+- **Create whole and exclusively.** Write the content to a temporary
+  file next to the lock (`lock.<hex>.tmp`), then `link()` it to the
+  lock path and remove the temporary file. `link` fails with `EEXIST`
+  when the lock exists, and a reader never sees a partly written lock.
+  The same helper creates the recovery mutex below.
+- **Held by a live process.** If the lock exists and its pid is alive
+  (`process.kill(pid, 0)` succeeds or fails with `EPERM`), throw
+  `LOCKED` with the run id and pid in the message.
+- **Stale.** If its pid is dead, or the file is not an owner record,
+  replace it, but only under the recovery mutex
+  `<repo>/.rensa/lock.recover` (`{ pid, token }`, created the same
+  way). Inside the mutex, read the lock again and unlink it only if it
+  is still stale: another contender may have replaced it with a live
+  lock since the first look. Then release the mutex and try `link`
+  again; up to 3 attempts, after which the live holder's `LOCKED` is
+  thrown. Why: two contenders that both saw the same stale lock would
+  otherwise both unlink and link, the second deleting the first one's
+  live lock, and both runs would hold it.
+- **Waiting for the mutex.** While a live process holds
+  `lock.recover`, poll every 25 ms for up to 5 s, then throw
+  `LOCKED`. A `lock.recover` whose pid is dead, or which is not an
+  owner record, is not broken automatically: doing so safely would
+  need the same exclusion one level up, and only a kernel lock, which
+  Node lacks, disappears with its holder. Throw `LOCKED` with the hint
+  `remove <path> if no rensa run is active in this repository`. This
+  only happens when a process is SIGKILLed inside the milliseconds of
+  a recovery; on any other exit the shutdown callback removes the
+  mutex, which is registered in the held set for that window.
+- **Release by token.** `release()` and the shutdown callback unlink a
+  file only if it still carries this acquisition's token, so a holder
+  can never delete someone else's lock. Read-then-unlink is safe
+  without the mutex: nobody else removes a file whose owner is alive.
+  `release()` is idempotent; if the unlink fails it throws and leaves
+  the entry held, so the shutdown callback tries again.
+
+Release on `run.finished`,
 and on process death through step 06's `onShutdown`, never through a
 `process.on('exit')` of its own: the shutdown module is the single
 ordered place for that, so the TUI's terminal restore runs first, the
@@ -149,10 +199,12 @@ orders the signal, not the death: the kill callback sends `SIGKILL`
 and returns without waiting, so children are signalled, not
 necessarily gone, when the lock is released. Register once at module
 load (so the registration precedes the TUI's, see step 06), with a
-module-level set of held lock paths; the callback `unlinkSync`s each
-one, ignoring `ENOENT`. `acquire` adds to the set, `release` removes
-from it, so a lock released on the normal path is not touched again at
-exit. Only taken for chains with `writes: true`.
+module-level map of held files (lock and, during recovery, mutex) to
+their tokens; the callback removes each one by token, ignoring
+`ENOENT`, tries every file even when one fails, and rethrows the first
+error afterwards. `acquire` adds to the map, `release` removes from it,
+so a lock released on the normal path is not touched again at exit.
+Only taken for chains with `writes: true`.
 
 ## Runner (runner.ts)
 
@@ -169,6 +221,20 @@ real: `git status`, `vars` evaluation and writing `prompt.md` are all
 asynchronous, and an `abort()` that lands inside one must not be
 followed by a spawn. On seeing `aborting`, the loop breaks to the
 finish instead of taking the next action.
+
+**State before notification.** Listeners run synchronously inside the
+emit and may call any command at once, so every state change is
+complete before the event that announces it: the runner's state, the
+current step and its `KillSignal`, the pending pause, the stored note,
+and the wake callback of a pause all exist before the matching event
+is emitted. In particular `run.paused` is emitted only after the wait
+is set up (create the promise, whose executor stores `wake`
+synchronously, then emit, then await), so a `resume()` or `abort()`
+from a `run.paused` listener is never lost; and `current` is cleared
+before `step.finished`, so a `kill()` from that listener finds nothing
+to kill. A command called re-entrantly from the listener of its own
+event finds its state already applied and does nothing, so it can
+never recurse or log a second action.
 
 For each step in order:
 
@@ -241,6 +307,20 @@ For each step in order:
    - Emit `step.finished`.
 5. If status is not `ok` and `step.onFail === 'stop'`: emit
    `run.finished { status: 'failed', failed_step }` and stop.
+
+   An engine error inside a step ends the run whatever `on_fail`
+   says, because it is a defect in the chain or the environment, not
+   the step's own outcome: a `TEMPLATE` error from `vars` (a `$(...)`
+   that fails), a prompt or persona file that cannot be read, a skill
+   directory that disappeared, or a `CONFIG_INVALID` from
+   `stageSkills`. The step finishes `failed` with no `agent.spawned`,
+   the run finishes `failed` with that step as `failed_step`, and the
+   `RunResult` carries the error's `code`, `message` and `hint`. A
+   `vars` command ended by `kill()` or `abort()` is not an error: the
+   step finishes `killed`. An adapter whose `spawn()` throws is
+   treated as the agent failing to start (step 07's rule 1): a `done`
+   with `exitCode: null` and `error.kind: 'exit'`, so `on_fail`
+   applies.
 6. If `step.pause === 'after'` or a user pause was requested during the
    step: emit `run.paused`, wait for `resume()`.
 
@@ -309,19 +389,30 @@ arrive.
 
 ## Commands
 
-- `pause()`: emit `user.action {pause, step}`; set a pending pause for
-  the end of the current step (or the next boundary when paused
-  already does nothing).
-- `resume()`: only valid in `paused`; continues.
-- `kill()`: emit `user.action {kill, step}`; kill the current step's
-  process; the step finishes `killed`, which is non-`ok`, so a `stop`
+Each command applies its state first and emits its event last (see
+"State before notification" above).
+
+- `pause()`: set a pending pause for the end of the current step (the
+  next boundary when idle), then emit `user.action {pause, step}`.
+  Does nothing while paused, aborting, or when a pause is already
+  pending, so repeated calls log one action.
+- `resume()`: only valid in `paused`. Leave `paused` at once, before
+  the loop continues, then take the wake callback (so it fires at most
+  once) and call it. A `pause()` right after `resume()` is therefore a
+  new request, honoured at the end of the step about to run, not
+  dropped as "already paused".
+- `kill()`: only while a step is running and not already killed. Kill
+  the current step's `KillSignal`, then emit `user.action {kill,
+  step}`. The step finishes `killed`, which is non-`ok`, so a `stop`
   step ends the run as `failed`; a `continue` step continues.
-- `abort()`: emit `user.action {abort}`, enter `aborting`, and return;
-  it finishes nothing itself. If the runner is in `paused`, resolve the
-  wait it is blocked on so the loop wakes and sees `aborting`. If a
-  child is running, call its `kill()` (step 06: SIGTERM to the group,
-  SIGKILL after 5 s) and let the step complete through its ordinary
-  path: the adapter's `events` run to the `done` step 07 guarantees
+- `abort()`: enter `aborting`, kill the current step's `KillSignal` if
+  any, take and call the wake callback if paused, then emit
+  `user.action {abort}`, and return; it finishes nothing itself. The
+  kill and the wake take effect asynchronously, so the action still
+  precedes their consequences in the log. If the runner was paused,
+  the loop wakes and sees `aborting`. If a child is running, the
+  signal reaches its `kill()` (step 06: SIGTERM to the group, SIGKILL
+  after 5 s), and the step completes through its ordinary path: the adapter's `events` run to the `done` step 07 guarantees
   even after a kill, so `agent.finished { killed }` and
   `step.finished { killed }` are written like any other step's events;
   a shell step returns its `ShellStepResult` with `killed`. If no child
@@ -335,9 +426,12 @@ arrive.
   time would let another `writes: true` run start while this agent is
   still modifying files, and would drop the aborted step's own finish
   events.
-- `note(text)`: emit `user.note { text, applies_from }` where
-  `applies_from` is the next step that has not started; store the note
-  for prompt rendering.
+- `note(text)`: store the note for prompt rendering, then emit
+  `user.note { text, applies_from }` where `applies_from` is the next
+  step that has not started (while paused before a step, that step).
+  After the last step has started no step remains, and
+  `applies_from` is the empty string: the note is logged but reaches
+  no prompt.
 
 Commands after `finished` are ignored.
 
@@ -402,13 +496,16 @@ export function reduceRun(events: RunEvent[]): RunProgress
   steps the map does not hold are skipped, never thrown on. Give the
   `switch` a default branch that returns the input map.
 - `applyResult(progress, result)` merges the in-memory terminal state
-  over what the events gave: if `progress.status` is already terminal
-  (a `run.finished` was seen) it only adds `error` when the result has
-  one and returns the same reference otherwise; if not, it returns a
-  new `RunProgress` with the result's `status`, `finishedAt`,
-  `failedStep` and `error`. This is the one place a run can end
-  without a `run.finished` event, and it lives here so neither
-  frontend interprets the result itself.
+  over what the events gave. The result is authoritative: when
+  `progress` already has the result's `status`, `failedStep` and
+  `error` (compared by `code`, `message` and `hint`), it returns the
+  same reference; otherwise it returns a new `RunProgress` with the
+  result's `status`, `finishedAt`, `failedStep` and `error`, replacing
+  whatever the events implied, an earlier terminal status included.
+  It is idempotent: applying the same result twice returns the first
+  call's object. This is the one place a run can end without a
+  `run.finished` event, and it lives here so neither frontend
+  interprets the result itself.
 - `reduceRun` folds `run.started`, `run.paused`, `step.started`,
   `user.action { abort }` and `run.finished` into `RunProgress`.
   `user.action { abort }` sets `status: 'aborting'` until
@@ -457,7 +554,9 @@ returns to a late consumer. `run.finished` on disk is the durable
 record of the same fact and is written whenever the log still works;
 consumers that only read the log (a future history screen) see a run
 without `run.finished` as unfinished, which is the honest reading of
-the file.
+the file. Where the two could disagree, the result wins: a delivered
+`run.finished` always carries the result's status (see Finish), and
+`applyResult` replaces any status the events implied.
 
 - `events()` is the handle's own append-only history, the same
   objects the `EventLog` returned from `append`, held for the life of
@@ -485,27 +584,56 @@ the file.
 ## Finish
 
 On any terminal state, once no child is running and no adapter
-`events` iterator is still open: emit `run.finished`, then `flush()`
-and `close()` the event log and all transcript writers, update
-`run.json` (`finished_at`, `status`, `steps`), release the lock, set
-the `RunResult`, fire `finished`, and resolve `handle.done`, in that
-order. The finish runs exactly once; `abort()` and a step's natural
+`events` iterator is still open, in this order:
+
+1. Close every transcript writer, then `flush()` the event log.
+2. Settle the status: any recorded engine or storage error makes it
+   `failed`, with that error's step as `failedStep` when it has one;
+   otherwise `aborted` if `abort()` was called, else the loop's status.
+3. Write `run.json` (`finished_at`, `status`, `steps`) with that
+   status. A failure here makes the status `failed`.
+4. Append `run.finished` with the settled status, then `close()` the
+   log. Only if that succeeds is the event delivered: pushed to the
+   handle's history and passed to `event` listeners. If it fails, the
+   status becomes `failed`, the event is never delivered (so
+   `events()` matches the file), and `run.json` is rewritten with
+   `failed`, best-effort.
+5. Release the lock.
+6. Set the `RunResult` (`finishedAt` is the delivered `run.finished`
+   event's `t`, else the time of step 3), fire `finished` on every
+   attached listener, including one attached during the finish
+   sequence, and resolve `handle.done`.
+
+Success is therefore announced only once every required write has
+succeeded, and nothing after the delivery of `run.finished` can change
+the outcome: a delivered `run.finished` always equals the result's
+status. The finish runs exactly once; `abort()` and a step's natural
 end both route through it and never perform any of these actions
 themselves.
+
+Every other event is delivered when it is appended, before it is on
+disk, so the live view does not wait on a write per event. A write
+that fails is detected at the next flush (after each `step.finished`,
+and in step 1) and takes the storage-failure path below; the history
+may then hold events the file lacks, but never a `run.finished`.
 
 **Storage failure.** Any rejection from the event log, a transcript
 writer, `prompt.md`/`reply.md`, `createRunDir` for an agent directory
 or `run.json` is fatal and takes this path: remember the first error,
 stop advancing (the same boundary checks as `aborting`), kill and
 drain the current child if any, then run the finish steps above
-best-effort, each in its own `try` with its error ignored, since the
-storage that failed is the storage they write to. The lock release
-and the `RunResult` are not best-effort: the lock is released, and
-`done` resolves with `status: 'failed'`, the current step as
-`failedStep`, and `error` built from the first rejection
-(`code: 'STORAGE'`, the `errno` message, hint "check free space and
-permissions under .rensa/runs"). The run therefore always reaches a
-terminal state in memory, whatever the disk did.
+best-effort, each in its own `try`, since the storage that failed is
+the storage they write to; a later failure never replaces the first
+error. A failure first seen during the finish (step 1, 3 or 4) is the
+first rejection too, and turns a run that was about to be `complete`
+or `aborted` into `failed`. The lock release and the `RunResult` are
+not best-effort: the lock is released, and `done` resolves with
+`status: 'failed'`, the current step as `failedStep` (none when the
+failure came during the finish), and `error` built from the first
+rejection (`code: 'STORAGE'`, the `errno` message, hint "check free
+space and permissions under .rensa/runs"). The run therefore always
+reaches a terminal state in memory, whatever the disk did, and every
+live consumer learns it through `finished` and `done`.
 
 ## Tests (integration, fake provider, tmp repo)
 
@@ -552,13 +680,34 @@ terminal state in memory, whatever the disk did.
 - `abort()` while paused (`pause: before` on the second step): the
   wait ends, no further `step.started`, `run.finished { aborted }`,
   lock released.
+- Commands from inside listeners (each call made synchronously in the
+  `event` listener, never after an `await`; give each run a 4 s
+  deadline so a lost wake fails instead of hanging):
+  - `resume()` in the `run.paused` listener: the run completes.
+  - `abort()` in the `run.paused` listener: `done` resolves `aborted`.
+  - `resume()` then `pause()` in the `run.paused { before: two }`
+    listener: step `two` runs, then `run.paused { after: two, reason:
+    user }`, and exactly one `user.action { pause }`.
+  - `kill()` in the `step.finished` listener: no `user.action { kill }`
+    is logged.
+  - `kill()` in the `user.action { kill }` listener: exactly one kill
+    action; `abort()` and `kill()` in the `user.action { abort }`
+    listener: exactly one abort action and no kill action.
+- Engine error in a step: a `continue` step whose `vars` holds
+  `$(exit 3)`: the step finishes `failed` with no `agent.spawned`, no
+  later step starts, `run.finished { failed, failed_step }`, and
+  `done` carries `error.code: 'TEMPLATE'`. The same with a `vars`
+  command killed by `abort()` finishes the step `killed` with no error.
+- `note()` after the last step has started: `user.note` has
+  `applies_from: ''`.
 - `abort()` during var evaluation: a step with `vars: { slow: $(sleep 30) }`
   and the fake adapter; abort 100 ms after `step.started`: `done`
   resolves `aborted` within 1 s (not 60 s), no `agent.spawned`, and
   `ps` shows no `sleep`.
 - `abort()` called synchronously after `start()` resolves, before any
-  step has done work: no `agent.spawned` and no `agent/` directory is
-  created, the events are exactly `run.started`, `user.action { abort }`,
+  step has done work: no `agent.spawned`, and `agents/` stays empty
+  (step 05's `createRunDir` creates it empty; nothing is created under
+  it), the events are exactly `run.started`, `user.action { abort }`,
   `run.finished { aborted }`, the lock is released and `ps` shows no
   child.
 - Storage failure: start a fake run with `RENSA_FAKE_DELAY_MS=100`,
@@ -568,11 +717,55 @@ terminal state in memory, whatever the disk did.
   'STORAGE' } }` with the `EACCES` text in `message`; the `finished`
   listener fired exactly once with the same object; `handle.result()`
   equals it; the lock file is gone; `attach` afterwards returns that
-  `result`; the file holds no `run.finished`. `applyResult` on the
-  `reduceRun` of that handle's events reports `failed` with the error;
-  on a complete run's progress it returns the same reference.
+  `result`; the file holds no `run.finished`, and neither does
+  `handle.events()`. `applyResult` on the `reduceRun` of that handle's
+  events reports `failed` with the error; on a complete run's progress
+  it returns the same reference.
+- Failure during final persistence: run a two-step chain with
+  `pause: before` on the second step, `chmod 0555` the run directory
+  from the `run.paused` listener, then `resume()`, so the log and
+  transcripts still write but `run.json` cannot. The `event` listener
+  receives `run.finished { failed }` and never `{ complete }`; `done`
+  resolves `failed` with a `STORAGE` error naming `EACCES`; `finished`
+  fires once with the same object; `events()` and `readEvents` on the
+  file list the same `seq`s.
+- `run.finished` not durable: `chmod 0444` `events.jsonl` from the last
+  step's `step.finished` listener: no `run.finished` is delivered to
+  any listener or present in `events()`, `done` resolves `failed` with
+  a `STORAGE` error, and the lock is released.
+- `applyResult` (unit, `view.test.ts`): a `reduceRun` progress whose
+  `run.finished` says `complete`, given a `failed` result with an
+  error, returns `failed` with the result's error, `failedStep` and
+  `finishedAt`; applying the same result to that output returns the
+  same reference; a result equal to the progress returns the same
+  reference.
 - Dirty tree refuses; a second `start` while locked refuses with
-  `LOCKED`; a stale lock with a dead pid is replaced.
+  `LOCKED`, not `DIRTY_TREE`, although the lock file is untracked; a
+  stale lock with a dead pid is replaced; leftover `.rensa/lock*`
+  files do not count as dirty.
+- Lock unit tests (`lock.test.ts`):
+  - Stale-lock race, in child processes, since the scenario is two
+    rensa processes with separate pids and truly concurrent filesystem
+    calls. Each round uses its own project directory with a lock whose
+    pid is dead, and six fresh processes that load the bundled
+    `lock.ts`, report ready, and start from a shared time the parent
+    sends once all six are ready, contender i delayed by i ms. Each
+    calls `acquireLock`, holds the lock 400 ms and releases it. Every
+    round has exactly one holder, the others get `LOCKED`, and neither
+    `lock` nor `lock.recover` remains. 60 rounds, 10 at a time; more at
+    a time delays some starts close to the hold time. The stagger
+    matters: contenders started in lockstep almost never interleave,
+    and a version without the mutex then passes. Measured: a version
+    without the mutex and re-inspection loses about 19 % of rounds and
+    fails the test 10 of 10 times; the real lock passes 10 of 10;
+    about 5 s.
+  - Release by token: overwrite the held lock with another token;
+    `release()` leaves that file in place and does not throw.
+  - Abandoned mutex: a stale `lock` and a `lock.recover` with a dead
+    pid: `LOCKED` whose hint names `lock.recover`, and `lock` is left
+    as it was.
+  - Live mutex: a `lock.recover` with a live pid that a timer removes
+    after 200 ms: `acquireLock` waits and then succeeds.
 - Lock on shutdown: acquire a lock, call step 06's `runShutdown()`, the
   lock file is gone. In its own test file (`lock.shutdown.test.ts`),
   for the same reason as step 06's shutdown test.
@@ -619,7 +812,8 @@ terminal state in memory, whatever the disk did.
   called right after `open()` rejects with `PROVIDER_UNAVAILABLE`,
   proving it awaited the check. `recheckProviders()` after the env
   changes fires `'providers'` again with the new status.
-- Timeout on a shell step (`sleep 5`, 200 ms) yields `timeout`.
+- Timeout on a shell step (`sleep 5`, `timeout: 1s`; the chain format
+  accepts only whole seconds, minutes or hours) yields `timeout`.
 - A shell step that times out with `on_fail: continue`, followed by an
   agent step whose prompt uses `{{steps.x.exit_code}}` and
   `{{steps.x.passed}}`: the prompt renders `143` and `false` instead of

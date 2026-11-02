@@ -1,0 +1,5 @@
+description: A skill whose SKILL.md body is over the limit.
+steps:
+  - id: review
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read, skills: [~/rensa-skills/big-body] }]

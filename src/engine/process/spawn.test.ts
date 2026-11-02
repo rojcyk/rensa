@@ -1,5 +1,9 @@
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
-import { killProcessesWithArgs, processesWithArgs } from '../../testing/processes.js'
+import {
+  killProcessesWithArgs,
+  processesWithArgs,
+  processGroupOf,
+} from '../../testing/processes.js'
 import { type TmpDir, tmpDir } from '../../testing/tmpRepo.js'
 import { RensaError } from '../errors.js'
 import { childEnv } from './env.js'
@@ -241,7 +245,11 @@ describe('killing the process group', () => {
     })
     const [escaped] = await waitForProcesses(ESCAPED_SLEEP, 1)
     assert(escaped, 'escaped sleep not found')
-    expect(escaped.pgid).not.toBe(pgid)
+    // The sleep's command line proves perl got past setsid() to exec, so a
+    // group read from now on is the new one.
+    const escapedGroup = await processGroupOf(escaped.pid)
+    expect(escapedGroup).toBeDefined()
+    expect(escapedGroup).not.toBe(pgid)
 
     const settledBeforeKill = settled
     const killedAt = Date.now()

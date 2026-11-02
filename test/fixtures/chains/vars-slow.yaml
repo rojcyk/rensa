@@ -1,0 +1,10 @@
+description: A var command that runs for a long time.
+steps:
+  - id: prep
+    prompt: steps/with-context.md
+    agents: [{ provider: fake, tools: read }]
+    on_fail: continue
+    vars:
+      context: $(sleep 30.6431)
+  - id: later
+    run: echo later

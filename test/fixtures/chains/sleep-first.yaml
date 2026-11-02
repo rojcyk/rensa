@@ -1,0 +1,7 @@
+description: Starts with a long shell step.
+steps:
+  - id: wait
+    run: sleep 30.6451
+  - id: review
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]

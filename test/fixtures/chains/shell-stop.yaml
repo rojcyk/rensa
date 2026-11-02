@@ -1,0 +1,7 @@
+description: A failing shell step that stops the run.
+steps:
+  - id: check
+    run: exit 2
+  - id: report
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]

@@ -1,0 +1,8 @@
+description: Pauses before its second step.
+steps:
+  - id: one
+    run: echo one
+  - id: two
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]
+    pause: before

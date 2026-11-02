@@ -9,6 +9,7 @@ export type RensaErrorCode =
   | 'INPUT_REQUIRED'
   | 'TEMPLATE'
   | 'PROCESS'
+  | 'STORAGE'
   | 'INTERNAL'
 
 export class RensaError extends Error {

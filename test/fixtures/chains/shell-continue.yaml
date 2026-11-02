@@ -1,0 +1,8 @@
+description: A failing shell step that lets the run continue.
+steps:
+  - id: check
+    run: exit 3
+    on_fail: continue
+  - id: report
+    prompt: steps/after-check.md
+    agents: [{ provider: fake, tools: read }]

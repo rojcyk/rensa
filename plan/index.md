@@ -259,6 +259,27 @@ this out).
 
 ## Revision notes
 
+- 2026-11-02, authoritative result (review of step 08). The finish
+  used to deliver `run.finished { complete }` before closing the log
+  and writers and before writing `run.json`, so a failed final write
+  reached consumers as success, and `applyResult` kept the earlier
+  terminal status. Step 08's finish now closes writers, flushes the
+  log and writes `run.json` first, then appends `run.finished` and
+  delivers it only once it is on disk; `applyResult` lets the
+  `RunResult` replace any status the events implied. Step 09 prints
+  the finish line from the result when `reduceRun` saw no terminal
+  status, not when `result.error` is set.
+- 2026-11-02, step 08 review, as built. Step 08 now records: the lock's
+  per-acquisition token and token-checked release, stale-lock
+  recovery serialized under `.rensa/lock.recover` (an abandoned mutex
+  is reported, not broken); the dirty-tree check excluding
+  `.rensa/lock*`; `STORAGE` added to `RensaErrorCode` for run-creation
+  failures; the runner's "state before notification" rule (wake
+  callback set before `run.paused`, commands apply state before
+  emitting, so a listener's re-entrant command is never lost or
+  repeated); `pause()` idempotent while one is pending; engine errors
+  in a step ending the run whatever `on_fail` says; and an empty
+  `applies_from` for a note sent after the last step started.
 - 2026-11-01, shutdown signals. Step 06's `SIGINT` listener no longer
   stands down when another listener exists; it is unconditional, with
   `onInterrupt` as the explicit override step 09 uses, and `SIGHUP` is

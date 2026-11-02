@@ -1,0 +1,9 @@
+description: A timed-out shell step whose result a later prompt reads.
+steps:
+  - id: slow
+    run: sleep 5.6471
+    timeout: 1s
+    on_fail: continue
+  - id: report
+    prompt: steps/after-slow.md
+    agents: [{ provider: fake, tools: read }]

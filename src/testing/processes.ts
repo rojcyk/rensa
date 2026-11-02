@@ -1,11 +1,10 @@
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
 export interface ProcessEntry {
   pid: number
-  pgid: number
   args: string
 }
 
@@ -16,15 +15,30 @@ export interface ProcessEntry {
  * show as `(sleep)` or `[sleep] <defunct>` and do not match.
  */
 export async function processesWithArgs(args: string): Promise<ProcessEntry[]> {
-  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,pgid=,args='])
+  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,args='])
   const found: ProcessEntry[] = []
   for (const line of stdout.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
-    if (match?.[3]?.trimEnd() === args) {
-      found.push({ pid: Number(match[1]), pgid: Number(match[2]), args })
-    }
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line)
+    if (match?.[2]?.trimEnd() === args) found.push({ pid: Number(match[1]), args })
   }
   return found
+}
+
+/**
+ * The process group of `pid` as of this call, or undefined when there is
+ * no such process. Read it here rather than alongside the command line:
+ * macOS `ps` snapshots every process's group first and reads each command
+ * line later, so one listing can pair a command line set by `exec` with
+ * the group from before a `setsid()` that preceded that `exec`.
+ */
+export async function processGroupOf(pid: number): Promise<number | undefined> {
+  try {
+    const { stdout } = await execFileAsync('ps', ['-o', 'pgid=', '-p', String(pid)])
+    const pgid = Number(stdout.trim())
+    return Number.isInteger(pgid) && pgid > 0 ? pgid : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** SIGKILLs every live process whose command line is exactly `args`. */
@@ -50,4 +64,15 @@ export function processState(pid: number): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * The pid of a process that has exited and been reaped, for a lock or
+ * mutex whose owner must be dead. A pid is reused only after the kernel
+ * wraps around, far beyond a test's lifetime.
+ */
+export function deadPid(): number {
+  const { pid, error } = spawnSync('true')
+  if (error || pid === undefined || pid <= 0) throw new Error(`cannot spawn true: ${error}`)
+  return pid
 }

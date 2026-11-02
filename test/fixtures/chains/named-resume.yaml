@@ -1,0 +1,13 @@
+description: One named agent used by two steps.
+agents:
+  impl:
+    provider: fake
+    tools: read
+    prompt: agents/implementer.md
+steps:
+  - id: draft
+    prompt: steps/review.md
+    agents: [impl]
+  - id: refine
+    prompt: steps/summarize.md
+    agents: [impl]

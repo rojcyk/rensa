@@ -44,11 +44,17 @@ stderr, exit 64.
    (step 08). Then await `handle.done`. Never `engine.on('event')`: the
    engine emitter carries no run events.
 5. `done` resolves with step 08's `RunResult`. Exit 0 on `complete`,
-   1 on `failed` or `aborted`. When `result.error` is set (a storage
-   failure, so no `run finished` line arrived through the events),
-   `printResult` writes `run       finished   failed  <elapsed>` to
-   stdout like the event would have, then `error: <message>` and
-   `  hint: <hint>` to stderr. After the first ctrl+c, `done` resolves only once the child has exited and the lock
+   1 on `failed` or `aborted`. When no `run.finished` event was
+   delivered (a storage failure kept it off disk, so step 08 never
+   delivers it), `printResult` writes `run       finished   <result.status>  <elapsed>`
+   to stdout like the event would have. Decide this from step 08's
+   view, not by matching event types: no `run.finished` arrived when
+   `reduceRun` over the printed events is not in a terminal status.
+   Never decide it from `result.error`: an
+   error that came after the log was flushed, or an engine error such
+   as `TEMPLATE`, sets `result.error` and still delivers
+   `run.finished { failed }`. Whenever `result.error` is set, write
+   `error: <message>` and `  hint: <hint>` to stderr. After the first ctrl+c, `done` resolves only once the child has exited and the lock
    is released (step 08), so the CLI waits up to step 06's 5 s
    escalation; print `aborting…` once on that first press so the wait
    is explained.

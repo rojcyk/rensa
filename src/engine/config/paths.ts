@@ -67,13 +67,18 @@ export function userConfigDir(
   return p.join(home, '.config', 'rensa')
 }
 
+/** `base` without the variables that would make git pick another repository. */
+export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...base }
+  for (const name of REPO_SELECTING_GIT_VARS) delete env[name]
+  return env
+}
+
 async function gitToplevel(cwd: string): Promise<string> {
-  const gitEnv = { ...process.env }
-  for (const name of REPO_SELECTING_GIT_VARS) delete gitEnv[name]
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
       cwd,
-      env: gitEnv,
+      env: gitEnv(),
     })
     const root = stdout.trim()
     if (!root) throw new Error('empty output')

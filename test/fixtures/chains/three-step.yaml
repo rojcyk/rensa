@@ -1,0 +1,9 @@
+description: A shell step, an agent step and a shell step.
+steps:
+  - id: baseline
+    run: echo baseline-ok
+  - id: review
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]
+  - id: wrap-up
+    run: echo wrap-up-ok
