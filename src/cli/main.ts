@@ -1,19 +1,43 @@
+import { parseArgs, USAGE } from './args.js'
+import { doctor } from './doctor.js'
+import { guardOutput, writeLines } from './format.js'
+import { runHeadless } from './headless.js'
+
 declare const __RENSA_VERSION__: string
 
-const USAGE = 'usage: rensa [--version] [--help]'
+/** sysexits EX_USAGE. */
+const EXIT_USAGE = 64
+const EXIT_NO_TUI = 2
 
-function main(argv: string[]): number {
-  const [arg] = argv
-  if (arg === '--version' || arg === '-v') {
-    process.stdout.write(`${__RENSA_VERSION__}\n`)
-    return 0
+async function main(argv: readonly string[]): Promise<number> {
+  const parsed = parseArgs(argv)
+  if (!parsed.ok) {
+    writeLines(process.stderr, [`rensa: ${parsed.message}`, USAGE])
+    return EXIT_USAGE
   }
-  if (arg === '--help' || arg === '-h') {
-    process.stdout.write(`${USAGE}\n`)
-    return 0
+  const { command } = parsed
+  switch (command.kind) {
+    case 'version':
+      writeLines(process.stdout, [__RENSA_VERSION__])
+      return 0
+    case 'help':
+      writeLines(process.stdout, [USAGE])
+      return 0
+    case 'tui':
+      // Step 11 wires the TUI.
+      writeLines(process.stderr, ['TUI not implemented'])
+      return EXIT_NO_TUI
+    case 'doctor':
+      return doctor(process.cwd(), process.env)
+    case 'run':
+      return runHeadless(command, process.cwd(), process.env)
   }
-  process.stderr.write('not implemented\n')
-  return 1
 }
 
-process.exitCode = main(process.argv.slice(2))
+// A rejection reaches the engine's uncaughtException handler, which runs
+// the shutdown callbacks and exits 1. The exit code is set rather than
+// forced so buffered stdout drains to a pipe before the process ends.
+guardOutput()
+void main(process.argv.slice(2)).then((code) => {
+  process.exitCode = code
+})

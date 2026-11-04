@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { Readable } from 'node:stream'
+import { diag } from '../diag.js'
 import { RensaError } from '../errors.js'
 import { lineReader } from './lines.js'
 import { onShutdown } from './shutdown.js'
@@ -238,11 +239,21 @@ function groupAlive(pgid: number): boolean {
   }
 }
 
+/**
+ * Signals every member of the group. Never throws for a group it cannot
+ * reach: ESRCH means the group is gone; EPERM means a member may not be
+ * signalled, which macOS also reports for a group whose only members are
+ * unreaped zombies (a child that exited just before a synchronous exit).
+ * Neither has a remedy, and a throw here would stop the shutdown kill of
+ * the remaining groups or escape from `kill()` into `abort()`.
+ */
 function signalGroup(pgid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pgid, signal)
   } catch (err) {
-    if (!isErrno(err, 'ESRCH')) throw err
+    if (isErrno(err, 'ESRCH')) return
+    if (!isErrno(err, 'EPERM')) throw err
+    diag('process', `cannot send ${signal} to process group ${pgid}: EPERM`)
   }
 }
 

@@ -1,4 +1,3 @@
-import { cp, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { vi } from 'vitest'
 import {
@@ -9,12 +8,8 @@ import {
   type RunResult,
   type StartOptions,
 } from '../engine/index.js'
-import { git, type TmpDir, type TmpRepo, tmpDir, tmpRepo } from './tmpRepo.js'
-
-/** Chains, step prompts, personas and skills shared by the engine tests. */
-export const CHAIN_FIXTURES = path.resolve(import.meta.dirname, '../../test/fixtures/chains')
-
-const SHARED_DIRS = ['steps', 'agents', 'skills']
+import { commitAll, installChains } from './chains.js'
+import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from './tmpRepo.js'
 
 /**
  * Environment every engine test needs: the fake provider registered, a
@@ -31,24 +26,6 @@ export function stubEngineEnv(home: string): void {
   for (const key of Object.keys(process.env)) {
     if (key.startsWith('RENSA_FAKE_')) vi.stubEnv(key, undefined)
   }
-}
-
-/** Copies the named chains and the shared prompt, persona and skill directories into `.rensa/`. */
-export async function installChains(repoDir: string, names: readonly string[]): Promise<void> {
-  const projectDir = path.join(repoDir, '.rensa')
-  await mkdir(projectDir, { recursive: true })
-  for (const dir of SHARED_DIRS) {
-    await cp(path.join(CHAIN_FIXTURES, dir), path.join(projectDir, dir), { recursive: true })
-  }
-  for (const name of names) {
-    await cp(path.join(CHAIN_FIXTURES, `${name}.yaml`), path.join(projectDir, `${name}.yaml`))
-  }
-}
-
-/** Stages and commits everything, so a chain that writes finds a clean tree. */
-export async function commitAll(dir: string, message = 'Add rensa chains'): Promise<void> {
-  await git(dir, ['add', '-A'])
-  await git(dir, ['commit', '--quiet', '--no-verify', '-m', message])
 }
 
 export interface EngineRepo {

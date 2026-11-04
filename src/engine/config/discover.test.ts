@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../testing/tmpRepo.js'
 import { RensaError } from '../errors.js'
-import { type ChainFile, discover } from './discover.js'
+import { type ChainFile, discover, withRunsLine } from './discover.js'
 
 let repo: TmpRepo
 let home: TmpDir
@@ -212,5 +212,28 @@ describe('discovery outside a repository', () => {
     } finally {
       await outside.cleanup()
     }
+  })
+})
+
+describe('the .gitignore content discovery leaves', () => {
+  it.each([
+    { given: undefined, expected: 'runs/\n', when: 'the file is missing' },
+    { given: '', expected: 'runs/\n', when: 'the file is empty' },
+    { given: '*.log\n', expected: '*.log\nruns/\n', when: 'it ends with a newline' },
+    { given: '*.log', expected: '*.log\nruns/\n', when: 'it lacks a final newline' },
+    { given: '*.log\r\n', expected: '*.log\r\nruns/\n', when: 'it has CRLF line endings' },
+    { given: '*.log\n  runs/\n', expected: '*.log\n  runs/\nruns/\n', when: 'runs/ is indented' },
+  ])('appends runs/ when $when', ({ given, expected }) => {
+    expect(withRunsLine(given)).toBe(expected)
+  })
+
+  it.each([
+    { given: 'runs/\n', when: 'runs/ is the only line' },
+    { given: '*.log\nruns/\nscratch/\n', when: 'runs/ is among other lines' },
+    { given: '*.log\r\nruns/\r\n', when: 'runs/ ends with CRLF' },
+    { given: '*.log\nruns/   \n', when: 'runs/ has trailing spaces' },
+    { given: '*.log\nruns/', when: 'runs/ is the last line without a newline' },
+  ])('returns the content unchanged when $when', ({ given }) => {
+    expect(withRunsLine(given)).toBe(given)
   })
 })

@@ -54,18 +54,27 @@ export async function ensureProjectDir(paths: Paths): Promise<boolean> {
       if (e.code === 'ENOENT') return undefined
       throw e
     })
-    // Git ignores trailing spaces in a pattern but not leading ones.
-    const listed = current?.split(/\r?\n/).some((line) => line.trimEnd() === GITIGNORE_LINE)
-    if (current === undefined) {
-      await writeFile(gitignore, `${GITIGNORE_LINE}\n`)
-    } else if (!listed) {
-      const sep = current === '' || current.endsWith('\n') ? '' : '\n'
-      await writeFile(gitignore, `${current}${sep}${GITIGNORE_LINE}\n`)
-    }
+    const next = withRunsLine(current)
+    if (next !== current) await writeFile(gitignore, next)
     return false
   }
-  await writeFile(gitignore, `${GITIGNORE_LINE}\n`)
+  await writeFile(gitignore, withRunsLine(undefined))
   return true
+}
+
+/**
+ * The `.rensa/.gitignore` content `ensureProjectDir` leaves given the
+ * current content (undefined when the file is missing): unchanged when it
+ * already lists `runs/`, else with that line appended. The dirty-tree
+ * check uses it to recognise this write as rensa's own.
+ */
+export function withRunsLine(current: string | undefined): string {
+  if (current === undefined) return `${GITIGNORE_LINE}\n`
+  // Git ignores trailing spaces in a pattern but not leading ones.
+  const listed = current.split(/\r?\n/).some((line) => line.trimEnd() === GITIGNORE_LINE)
+  if (listed) return current
+  const sep = current === '' || current.endsWith('\n') ? '' : '\n'
+  return `${current}${sep}${GITIGNORE_LINE}\n`
 }
 
 async function listChains(projectDir: string): Promise<ChainFile[]> {

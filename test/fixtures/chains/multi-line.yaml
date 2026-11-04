@@ -1,0 +1,7 @@
+description: A shell step whose command spans several lines, one of them blank.
+steps:
+  - id: greet
+    run: |
+      echo one
+
+      echo two

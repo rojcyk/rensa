@@ -68,7 +68,9 @@ export async function ensureProjectDir(paths: Paths): Promise<boolean>
 `.gitignore` containing exactly `runs/\n`; return true. If it exists,
 ensure `.gitignore` exists with that line (append the line if the file
 exists without it); return false. Never touch the repository's own
-`.gitignore`.
+`.gitignore`. The resulting content is the pure, exported
+`withRunsLine(current)`, which step 08's dirty-tree check uses to
+recognise this write as rensa's own.
 
 `discover` calls `resolvePaths`, `ensureProjectDir`, lists chain files
 (case-insensitive extension match, skip dotfiles and `project.yaml`),

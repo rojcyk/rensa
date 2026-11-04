@@ -176,6 +176,15 @@ export function spawnProcess(opts: SpawnOptions): Child
   `groupAlive(pid)`. A grandchild that leaves the group with its own
   `setsid` is out of reach by definition, as for every process-group
   tool; the README (step 17) says so.
+- Every group signal (`kill()`'s SIGTERM and SIGKILL, the shutdown
+  SIGKILL) goes through one `signalGroup` that never throws for a group
+  it cannot reach: `ESRCH` is ignored, `EPERM` is reported through
+  `diag('process', …)` and otherwise ignored. macOS answers `EPERM`,
+  not `ESRCH`, for a group whose only members are unreaped zombies,
+  which is the state of a child that exited just before a synchronous
+  exit (a crash, a second ctrl+c); a throw there stopped the shutdown
+  kill of the remaining groups and escaped from `kill()` into
+  `abort()`. Other errors still throw.
 - `kill()`: `process.kill(-pid, 'SIGTERM')`, ignoring `ESRCH`; after
   `escalateMs`, `process.kill(-pid, 'SIGKILL')` to the group
   unconditionally, ignoring `ESRCH`. The escalation does not consult

@@ -116,7 +116,19 @@ Preconditions, each a `RensaError` thrown before anything is written:
   and their temporary files): `.rensa/.gitignore` lists only `runs/`,
   so without the exclusion a held or stale lock would make the tree
   dirty, a second start would fail `DIRTY_TREE` instead of `LOCKED`,
-  and a stale lock could never be replaced.
+  and a stale lock could never be replaced. `.rensa/.gitignore` is
+  excluded from that status and checked on its own: discovery writes
+  it on every `open` (step 02), so a repository that committed
+  `.rensa/` without it would otherwise refuse its first run. It counts
+  as clean when both its staged and working copies equal either
+  `HEAD`'s content or what step 02's `withRunsLine` makes of it; any
+  other change, a staged deletion included, is the user's and is dirty.
+  The comparison is by Git object id, never raw bytes: the working file
+  is hashed with `git hash-object -- .rensa/.gitignore` (the path's
+  attributes and filters apply), `withRunsLine(HEAD blob)` with
+  `git hash-object --stdin` (no filters; the blob is already
+  normalized), so `eol=crlf` or `core.autocrlf` checkouts compare the
+  way `git status` does.
 - `base` names a commit (`CONFIG_INVALID`, hint "pass an existing
   branch, tag or sha as the base"); a ref starting with `-` is refused
   before git sees it
@@ -743,6 +755,15 @@ live consumer learns it through `finished` and `done`.
   `LOCKED`, not `DIRTY_TREE`, although the lock file is untracked; a
   stale lock with a dead pid is replaced; leftover `.rensa/lock*`
   files do not count as dirty.
+- `.rensa/.gitignore` and the dirty check: a committed write chain
+  with no `.gitignore` committed runs on the first and second try; an
+  appended `runs/` on a committed `.gitignore` is not dirty; a user
+  line added on top, an untracked `.gitignore` with an extra line, and
+  a staged deletion are dirty; a deleted file that discovery recreates
+  with `HEAD`'s content is not. The same with `.rensa/.gitignore text
+  eol=crlf` in `.gitattributes` and with `core.autocrlf=true`, the file
+  freshly checked out as CRLF: the appended `runs/` is not dirty, a user
+  line is.
 - Lock unit tests (`lock.test.ts`):
   - Stale-lock race, in child processes, since the scenario is two
     rensa processes with separate pids and truly concurrent filesystem

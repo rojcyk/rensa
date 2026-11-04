@@ -76,3 +76,19 @@ export function deadPid(): number {
   if (error || pid === undefined || pid <= 0) throw new Error(`cannot spawn true: ${error}`)
   return pid
 }
+
+/**
+ * Blocks the event loop until `pid` is an unreaped zombie (`ps` state
+ * `Z`), so Node cannot reap it before the caller's next synchronous
+ * statement. A child that exited this way is the only member of its
+ * process group, the state a crash or a second ctrl+c meets at exit.
+ * Throws when the process is not a zombie within `timeoutMs`.
+ */
+export function blockUntilZombie(pid: number, timeoutMs = 5_000): void {
+  const deadline = Date.now() + timeoutMs
+  while (!processState(pid)?.startsWith('Z')) {
+    if (Date.now() > deadline) {
+      throw new Error(`process ${pid} was not a zombie within ${timeoutMs} ms`)
+    }
+  }
+}

@@ -1,10 +1,12 @@
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  blockUntilZombie,
   killProcessesWithArgs,
   processesWithArgs,
   processGroupOf,
 } from '../../testing/processes.js'
 import { type TmpDir, tmpDir } from '../../testing/tmpRepo.js'
+import { type DiagEntry, onDiag } from '../diag.js'
 import { RensaError } from '../errors.js'
 import { childEnv } from './env.js'
 import { KillSignal, liveProcessGroups, type SpawnOptions, spawnProcess } from './spawn.js'
@@ -264,6 +266,62 @@ describe('killing the process group', () => {
     expect(await processesWithArgs(ESCAPED_SLEEP)).toHaveLength(1)
   })
 })
+
+describe('a group whose only member is an unreaped zombie', () => {
+  /** Diagnostics recorded while `fn` runs. */
+  function diagnosed(fn: () => void): DiagEntry[] {
+    const entries: DiagEntry[] = []
+    const stop = onDiag((entry) => entries.push(entry))
+    try {
+      fn()
+    } finally {
+      stop()
+    }
+    return entries
+  }
+
+  it('does not throw from kill() and still settles with the exit when the child exited unreaped', async () => {
+    const child = spawnProcess(options({ argv: ['true'], escalateMs: 50 }))
+    assert(child.pid !== undefined, 'spawn failed')
+    blockUntilZombie(child.pid)
+
+    // Same tick as the block: the zombie is still unreaped here.
+    const thrown = catchSync(() => child.kill())
+    const result = await child.result
+
+    expect(thrown).toBeUndefined()
+    expect(result).toMatchObject({ exitCode: 0, killed: true, timedOut: false })
+  })
+
+  // macOS answers EPERM for a zombie-only group; Linux delivers the signal
+  // or answers ESRCH, so there is nothing to report there.
+  it.runIf(process.platform === 'darwin')(
+    'reports the refused SIGTERM through diag when kill() meets EPERM on macOS',
+    async () => {
+      const child = spawnProcess(options({ argv: ['true'], escalateMs: 50 }))
+      const pgid = child.pid
+      assert(pgid !== undefined, 'spawn failed')
+      blockUntilZombie(pgid)
+
+      const entries = diagnosed(() => child.kill())
+      await child.result
+
+      expect(entries.filter((e) => e.scope === 'process').map((e) => e.message)).toEqual([
+        `cannot send SIGTERM to process group ${pgid}: EPERM`,
+      ])
+    },
+  )
+})
+
+/** The error `fn` throws, or undefined when it returns. */
+function catchSync(fn: () => void): unknown {
+  try {
+    fn()
+    return undefined
+  } catch (err) {
+    return err
+  }
+}
 
 describe('live-groups registry', () => {
   it('holds the pgid while the process runs and drops it once the process exits', async () => {

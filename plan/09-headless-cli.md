@@ -66,6 +66,13 @@ stderr, exit 64.
    default applies and the first press exits 130. The `process.exit(130)`
    on the second press runs the shutdown callbacks (kill children,
    release lock) through `'exit'`; do not duplicate that cleanup here.
+   A reader that closes stdout (`rensa run … | head`) is treated the
+   same way as a first press: `main.ts` calls `guardOutput()` once,
+   which turns `EPIPE` on stdout or stderr into a destroyed stream that
+   `writeLines` skips, and `onStdoutClosed` lets `rensa run` call
+   `handle.abort()` and print `aborting: stdout was closed` to stderr.
+   The run ends `aborted` (exit 1) with its lock released, never with
+   a stack trace. Other stream errors still throw.
 7. Diagnostics: with `RENSA_DEBUG=1`, subscribe to step 07's `onDiag`
    before `engine.start()` and write each entry to stderr as
    `<HH:MM:SS>  diag      <scope>  <message>`; without it, ignore
@@ -96,6 +103,12 @@ One line per event, local time:
   output line under label `shell` (step 08), so `npm test` output
   prints as `<step>/shell | …` lines. `'delta'` is never subscribed,
   so output is line-oriented and greppable.
+- Every event prints as exactly one line. A multi-line shell command
+  (`run: |`) shows in `step started` as its non-blank lines, trimmed,
+  joined with ` ⏎ ` (`echo one ⏎ echo two`); free text in an event line
+  (note text, agent error messages, tool summaries) has every line
+  break, lone `\r` included, collapsed to a space. Display only: the
+  event and `--json` keep the original text.
 - Tool records print as `▸ <name> <one-line input summary>` where the
   summary is the first string-valued field of `input` truncated to 80
   chars.
@@ -122,8 +135,14 @@ codex    not logged in    0.48      run: codex login
 grok     not installed
 ```
 
-Exit 0 if every provider used by at least one chain in the repo is
-ready, else 1. Outside a repo, lists providers and exits 0. `doctor`
+Exit 0 if every chain in the repo loaded and every provider used by at
+least one of them is ready, else 1. A chain that failed to load has no
+resolved steps, so its providers cannot be checked (its
+`missingProviders` is empty, not clean): each one prints
+`error: cannot check the providers of chain \`<name>\`: <message>` and
+its hint to stderr after the provider rows, and makes the exit 1. A
+`fake` chain without `RENSA_DEV=1` is such a chain, the same one
+`rensa run` rejects. Outside a repo, lists providers and exits 0. `doctor`
 is the one command that awaits `engine.providersChecked` directly,
 then reads `providers()` and `chains()`.
 
@@ -159,10 +178,23 @@ if it is missing. Chains come from `test/fixtures/chains/`.
 - Args: every form above, unknown flag exit code.
 - E2E (`test/e2e/run.test.ts`): `rensa run` on a two-step fake chain prints the expected
   line sequence (assert on the keyword columns, not timestamps) and
-  exits 0; a chain with a `pause` exits 1 with the hint unless
+  exits 0; a multi-line `run: |` command prints as one `step started`
+  line in default and `--quiet` output, and every stdout line in
+  `--quiet` output starts with a time and a `run`/`step`/`agent`
+  keyword, while `--json` keeps the command's newlines; a chain with a
+  `pause` exits 1 with the hint unless
   `--no-pause`; `--json` output parses line by line.
+- E2E (`test/e2e/run.test.ts`): a slow fake chain piped into a reader
+  that closes after a few lines exits 1 with `aborting: stdout was
+  closed` and no stack trace on stderr, its run ends with `run.finished
+  aborted`, and no `.rensa/lock` is left.
+- Unit (`spawn.test.ts`, step 06): a child that exits while the event
+  loop is blocked leaves a zombie-only group; `kill()` and
+  `runShutdown()` then neither throw nor report a failed callback.
 - E2E (`test/e2e/doctor.test.ts`): `doctor` exits as specified with the
-  fake provider registered.
+  fake provider registered; without `RENSA_DEV=1` a fake-provider chain
+  makes it exit 1 with the chain's load error on stderr; with one
+  valid and one unparseable chain it exits 1.
 
 ## Verification (human)
 

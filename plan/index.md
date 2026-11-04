@@ -259,6 +259,23 @@ this out).
 
 ## Revision notes
 
+- 2026-11-02, closed stdout and zombie groups (found by step 09 review).
+  `rensa run … | head` crashed on `EPIPE` through the uncaught-exception
+  path, killing the run and printing a stack. Step 09 now aborts the
+  run cleanly when stdout's reader goes away (`guardOutput`,
+  `onStdoutClosed`). The same crash exposed step 06's `signalGroup`
+  rethrowing `EPERM`, which macOS returns for a zombie-only group;
+  `EPERM` is now a diagnostic, so the shutdown kill reaches every group.
+- 2026-11-02, first-run dirty tree (found by step 09). Discovery
+  writes `.rensa/.gitignore` on every `Engine.open`, so in a clean
+  repository whose committed `.rensa/` lacked it, a write chain's
+  first run failed `DIRTY_TREE` on rensa's own file. Step 02's append
+  logic is now the pure `withRunsLine`; step 08's dirty check excludes
+  `.rensa/.gitignore` from the status and accepts it only when its
+  staged and working copies are `HEAD`'s content or `withRunsLine` of
+  it, so user changes to the file still count. Compared by Git object
+  id with the path's filters applied to the working file, so line-ending
+  conversion (`eol=crlf`, `core.autocrlf`) does not defeat it (review P2).
 - 2026-11-02, authoritative result (review of step 08). The finish
   used to deliver `run.finished { complete }` before closing the log
   and writers and before writing `run.json`, so a failed final write

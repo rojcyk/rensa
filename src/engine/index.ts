@@ -7,7 +7,7 @@
 import './run/lock.js'
 import './process/spawn.js'
 
-export type { ProviderStatus } from './adapters/available.js'
+export { checkProviders, type ProviderStatus } from './adapters/available.js'
 export type { AgentProcess, Availability, Capabilities } from './adapters/types.js'
 export { type ChainFile, type Discovered, discover, ensureProjectDir } from './config/discover.js'
 export { EFFORT } from './config/effort.js'
