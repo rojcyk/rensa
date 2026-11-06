@@ -259,6 +259,19 @@ this out).
 
 ## Revision notes
 
+- 2026-11-06, dirty tree and shell steps (found by step 10 review).
+  Step 10's `review` chain (`npm test`, then a read-only review of
+  `git diff {{base}}`) could not run on a change in progress: its shell
+  step made the chain `writes`, and step 08 refused every `writes`
+  chain on a dirty tree. The dirty check now applies only when a step's
+  agent resolves to `tools: write`; shell steps no longer count for it.
+  `writes` and the repo lock are unchanged. Steps 03, 08 and 13 say so.
+- 2026-11-06, Claude parser as built (step 10 review). `usage.context`
+  is the last assistant message's `input_tokens` plus its cache-read
+  and cache-creation tokens, since `input_tokens` alone is only the
+  uncached tail; a `result` with `is_error: true` is an error even when
+  its subtype is `success`, which is how Claude Code 2.1.319 reports
+  "Not logged in".
 - 2026-11-02, closed stdout and zombie groups (found by step 09 review).
   `rensa run … | head` crashed on `EPIPE` through the uncaught-exception
   path, killing the run and printing a stack. Step 09 now aborts the

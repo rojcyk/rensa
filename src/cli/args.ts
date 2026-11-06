@@ -1,4 +1,4 @@
-import type { RunInput } from '../engine/index.js'
+import { PROVIDERS, type Provider, type RunInput } from '../engine/index.js'
 
 export const USAGE = `usage:
   rensa                                     open the TUI
@@ -27,6 +27,15 @@ export type Command =
   | { kind: 'help' }
   | { kind: 'doctor' }
   | ({ kind: 'run' } & RunArgs)
+  | ({ kind: 'capture' } & CaptureArgs)
+
+/** `rensa capture <provider> <name> <prompt>`: a development command, not in `USAGE`. */
+export interface CaptureArgs {
+  provider: Provider
+  /** Fixture directory name under `test/fixtures/<provider>/`. */
+  name: string
+  prompt: string
+}
 
 /** A command, or the reason the arguments are not one (usage error, exit 64). */
 export type ParsedArgs = { ok: true; command: Command } | { ok: false; message: string }
@@ -48,6 +57,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       return rest.length === 0 ? ok({ kind: 'doctor' }) : extra(rest)
     case 'run':
       return parseRun(rest)
+    case 'capture':
+      return parseCapture(rest)
     default:
       return fail(first.startsWith('-') ? `unknown flag ${first}` : `unknown command ${first}`)
   }
@@ -118,6 +129,26 @@ function parseRun(argv: readonly string[]): ParsedArgs {
     output: json ? 'json' : quiet ? 'quiet' : 'lines',
     ...(base !== undefined && { base }),
   })
+}
+
+const FIXTURE_NAME = /^[a-z0-9_-]+$/i
+
+function parseCapture(argv: readonly string[]): ParsedArgs {
+  const [provider, name, ...words] = argv
+  const usage = 'usage: rensa capture <provider> <name> "<prompt>"'
+  if (provider === undefined || name === undefined || words.length === 0) return fail(usage)
+  if (!isProvider(provider))
+    return fail(`unknown provider ${provider}; expected one of ${PROVIDERS.join(', ')}`)
+  if (!FIXTURE_NAME.test(name)) {
+    return fail(`fixture name \`${name}\` may contain only letters, digits, \`_\` and \`-\``)
+  }
+  const prompt = words.join(' ')
+  if (prompt.trim() === '') return fail('rensa capture needs a prompt')
+  return ok({ kind: 'capture', provider, name, prompt })
+}
+
+function isProvider(value: string): value is Provider {
+  return PROVIDERS.some((p) => p === value)
 }
 
 /** `--flag=value` → [`--flag`, `value`]; anything else → [arg, undefined]. */

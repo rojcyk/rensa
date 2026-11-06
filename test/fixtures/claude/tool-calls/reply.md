@@ -1,0 +1,2 @@
+- **LICENSE**: This is the MIT License, copyright 2026 Example Author, which lets anyone use, change and share the software as long as they keep the copyright notice, and offers no warranty.
+- **biome.json**: This configures Biome's formatter and linter (2-space indent, 100-character lines, single quotes, semicolons only where needed, recommended lint rules), and it enforces the architecture rule: `src/engine` can't import from `src/tui` or `src/cli`, and those two can only reach the engine through `src/engine/index.ts`.

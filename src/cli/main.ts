@@ -1,4 +1,5 @@
 import { parseArgs, USAGE } from './args.js'
+import { runCapture } from './capture.js'
 import { doctor } from './doctor.js'
 import { guardOutput, writeLines } from './format.js'
 import { runHeadless } from './headless.js'
@@ -31,6 +32,12 @@ async function main(argv: readonly string[]): Promise<number> {
       return doctor(process.cwd(), process.env)
     case 'run':
       return runHeadless(command, process.cwd(), process.env)
+    case 'capture':
+      if (process.env.RENSA_DEV !== '1') {
+        writeLines(process.stderr, ['rensa: capture is a development command; set RENSA_DEV=1'])
+        return EXIT_USAGE
+      }
+      return runCapture(command, process.cwd(), process.env)
   }
 }
 

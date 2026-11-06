@@ -1,10 +1,10 @@
-import { constants } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
-import path from 'node:path'
 import type { Provider } from '../config/types.js'
 import { diag } from '../diag.js'
 import { allAdapters } from './registry.js'
 import type { Adapter, Availability } from './types.js'
+
+// Lives in path.ts so adapters can use it without importing the registry.
+export { findOnPath } from './path.js'
 
 export interface ProviderStatus {
   provider: Provider
@@ -51,34 +51,5 @@ async function withTimeout(adapter: Adapter, env: NodeJS.ProcessEnv): Promise<Pr
     return { provider, availability: await Promise.race([check, timeout]) }
   } finally {
     clearTimeout(timer)
-  }
-}
-
-/**
- * The absolute path `bin` resolves to on `env.PATH`, or undefined. Every
- * directory is checked at once, starting synchronously; the first match
- * in PATH order wins. A `bin` containing a slash is checked as given.
- */
-export async function findOnPath(bin: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
-  const candidates = bin.includes('/')
-    ? [path.resolve(bin)]
-    : (env.PATH ?? '')
-        .split(path.delimiter)
-        // An empty entry means the current directory; never look there.
-        .filter((dir) => dir !== '')
-        .map((dir) => path.join(dir, bin))
-  const checks = candidates.map(isExecutableFile)
-  for (const [i, check] of checks.entries()) {
-    if (await check) return candidates[i]
-  }
-  return undefined
-}
-
-async function isExecutableFile(file: string): Promise<boolean> {
-  try {
-    const [info] = await Promise.all([stat(file), access(file, constants.X_OK)])
-    return info.isFile()
-  } catch {
-    return false
   }
 }

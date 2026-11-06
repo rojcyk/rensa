@@ -143,7 +143,8 @@ field to `RensaError`).
   `input: none` is an error. A declared var no prompt references is a
   warning, returned on the chain as `warnings: string[]`.
 - Any shell step, or any step whose agent ends up with `write`, marks the
-  chain `writes: true` (add to `ResolvedChain`).
+  chain `writes: true` (add to `ResolvedChain`). `writes` decides the
+  repo lock; step 08's dirty-tree check looks only at write agents.
 
 ## index.ts
 

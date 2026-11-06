@@ -110,9 +110,13 @@ Input: raw stdout lines. Each line is a JSON object with `type`. Emit
 
 The parser's `done` is provisional (step 07): `reply = result.result ?? ''`;
 `exitCode: null` (the stream does not carry it; `spawn` fills it in);
-`usage` from `result.usage` → `{ input: input_tokens, output: output_tokens, cache_read: cache_read_input_tokens, context: <input tokens of the last assistant message usage if present> }`;
+`usage` from `result.usage` → `{ input: input_tokens, output: output_tokens, cache_read: cache_read_input_tokens, context: <input_tokens + cache_read_input_tokens + cache_creation_input_tokens of the last assistant message usage, if present> }`
+(with prompt caching `input_tokens` alone is only the uncached tail: 2
+in the `read-only-hello` capture, against a context of 19,008);
 `sessionId` is not set (Claude uses the id rensa passes);
-`error` when `result.subtype !== 'success'`, from stdout only:
+`error` when `result.subtype !== 'success'` or `result.is_error === true`
+(Claude Code 2.1.319 reports "Not logged in" and an unknown model as
+`subtype: success` with `is_error: true`), from stdout only:
 
 - reply matching `/usage limit|hit your .* limit|resets/i` → `usage_limit`
 - reply matching `/not logged in|auth|login/i` → `auth`

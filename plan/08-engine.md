@@ -109,9 +109,13 @@ Preconditions, each a `RensaError` thrown before anything is written:
 - chain has pauses and `opts.noPause` is false and the caller is
   headless: the CLI passes `opts.headless: true`; the engine throws
   `CONFIG_INVALID` with hint "pass --no-pause"
-- if `chain.writes`: `git status --porcelain --untracked-files=all`
-  must be empty (`DIRTY_TREE`), and the repo lock must be acquired
-  (`LOCKED`). The status excludes rensa's own lock files with the
+- if any step's agent resolves to `tools: write`:
+  `git status --porcelain --untracked-files=all` must be empty
+  (`DIRTY_TREE`). Shell steps do not count for this check: the chain's
+  author wrote the command and knows what it does, and a chain such as
+  step 10's `review` has to run its tests on a change in progress.
+  If `chain.writes` (any shell step or write agent), the repo lock must
+  be acquired (`LOCKED`). The status excludes rensa's own lock files with the
   pathspec `:(exclude,top,glob).rensa/lock*` (the lock, `lock.recover`
   and their temporary files): `.rensa/.gitignore` lists only `runs/`,
   so without the exclusion a held or stale lock would make the tree
@@ -751,7 +755,9 @@ live consumer learns it through `finished` and `done`.
   `finishedAt`; applying the same result to that output returns the
   same reference; a result equal to the progress returns the same
   reference.
-- Dirty tree refuses; a second `start` while locked refuses with
+- Dirty tree refuses a chain with a write agent; a chain of shell
+  steps and read-only agents starts on a dirty tree and still takes the
+  lock; a second `start` while locked refuses with
   `LOCKED`, not `DIRTY_TREE`, although the lock file is untracked; a
   stale lock with a dead pid is replaced; leftover `.rensa/lock*`
   files do not count as dirty.

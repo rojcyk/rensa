@@ -1,0 +1,25 @@
+{
+  "provider": "claude",
+  "captured": "2026-11-06",
+  "argv": [
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--input-format",
+    "stream-json",
+    "--session-id",
+    "00000000-0000-4000-8000-000000000001",
+    "--tools",
+    "Read,Glob,Grep",
+    "--allowedTools",
+    "Read,Glob,Grep",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none"
+  ],
+  "note": "claude 2.1.319 (Claude Code). Prompt: List the files in this directory and say hello. Redacted after capture: home directory and username, the LICENSE author's name, session ids, the login expiry, rate-limit figures and process ids replaced with placeholders."
+}

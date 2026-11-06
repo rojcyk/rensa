@@ -1,6 +1,7 @@
 import { EFFORT } from '../config/effort.js'
 import { EFFORTS, PROVIDERS, type Provider, TOOLS } from '../config/types.js'
 import { RensaError } from '../errors.js'
+import { claudeAdapter } from './claude/index.js'
 import { fakeAdapter } from './fake/index.js'
 import type { Adapter } from './types.js'
 
@@ -8,7 +9,7 @@ type RealProvider = Exclude<Provider, 'fake'>
 
 /**
  * Stands in for a provider whose adapter is not written yet: never
- * installed, cannot spawn. Steps 10, 15 and 16 replace these.
+ * installed, cannot spawn. Steps 15 and 16 replace these.
  */
 function stubAdapter(provider: RealProvider): Adapter {
   const notImplemented = () => new RensaError('INTERNAL', `${provider} adapter not implemented`)
@@ -32,7 +33,7 @@ function stubAdapter(provider: RealProvider): Adapter {
 }
 
 const REAL: Record<RealProvider, Adapter> = {
-  claude: stubAdapter('claude'),
+  claude: claudeAdapter,
   codex: stubAdapter('codex'),
   grok: stubAdapter('grok'),
 }

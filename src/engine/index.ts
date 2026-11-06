@@ -8,22 +8,24 @@ import './run/lock.js'
 import './process/spawn.js'
 
 export { checkProviders, type ProviderStatus } from './adapters/available.js'
+export { type CaptureOptions, type CaptureResult, captureFixture } from './adapters/capture.js'
 export type { AgentProcess, Availability, Capabilities } from './adapters/types.js'
 export { type ChainFile, type Discovered, discover, ensureProjectDir } from './config/discover.js'
 export { EFFORT } from './config/effort.js'
 export { loadAllChains, loadChain } from './config/index.js'
 export { type Paths, resolvePaths, userConfigDir } from './config/paths.js'
-export type {
-  AgentConfig,
-  AgentStep,
-  Effort,
-  Provider,
-  ResolvedAgent,
-  ResolvedChain,
-  ShellStep,
-  Step,
-  Tools,
-  VarSpec,
+export {
+  type AgentConfig,
+  type AgentStep,
+  type Effort,
+  PROVIDERS,
+  type Provider,
+  type ResolvedAgent,
+  type ResolvedChain,
+  type ShellStep,
+  type Step,
+  type Tools,
+  type VarSpec,
 } from './config/types.js'
 export { validateWithAdapters } from './config/validate.js'
 export { type DiagEntry, diag, drainDiag, onDiag } from './diag.js'

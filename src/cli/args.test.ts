@@ -201,3 +201,61 @@ describe('usage errors', () => {
     expect(parseArgs(['--version', 'run'])).toEqual(usageError('unexpected argument run'))
   })
 })
+
+describe('rensa capture', () => {
+  it('takes provider, fixture name and the prompt when given all three', () => {
+    expect(
+      parseArgs(['capture', 'claude', 'read-only-hello', 'List the files in this directory.']),
+    ).toEqual(
+      parsed({
+        kind: 'capture',
+        provider: 'claude',
+        name: 'read-only-hello',
+        prompt: 'List the files in this directory.',
+      }),
+    )
+  })
+
+  it('joins several prompt words with single spaces when the prompt is unquoted', () => {
+    expect(parseArgs(['capture', 'claude', 'tool-calls', 'Read', 'LICENSE', 'twice'])).toEqual(
+      parsed({
+        kind: 'capture',
+        provider: 'claude',
+        name: 'tool-calls',
+        prompt: 'Read LICENSE twice',
+      }),
+    )
+  })
+
+  it.each([[['capture']], [['capture', 'claude']], [['capture', 'claude', 'read-only-hello']]])(
+    'reports the capture usage when given %j',
+    (argv) => {
+      expect(parseArgs(argv)).toEqual(
+        usageError('usage: rensa capture <provider> <name> "<prompt>"'),
+      )
+    },
+  )
+
+  it('refuses a provider rensa does not know', () => {
+    const result = parseArgs(['capture', 'gemini', 'hello', 'Say hello.'])
+
+    expect(result).toEqual(
+      usageError('unknown provider gemini; expected one of claude, codex, grok, fake'),
+    )
+  })
+
+  it.each([['../escape'], ['nested/name'], ['with space']])(
+    'refuses fixture name %s when it is not letters, digits, _ and -',
+    (name) => {
+      const result = parseArgs(['capture', 'claude', name, 'Say hello.'])
+
+      expect(result.ok).toBe(false)
+    },
+  )
+
+  it('refuses a prompt that is only whitespace', () => {
+    expect(parseArgs(['capture', 'claude', 'hello', '  '])).toEqual(
+      usageError('rensa capture needs a prompt'),
+    )
+  })
+})

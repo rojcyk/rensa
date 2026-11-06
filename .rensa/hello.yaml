@@ -1,0 +1,6 @@
+description: One agent answers the input.
+input: text
+steps:
+  - id: answer
+    prompt: steps/hello.md
+    agents: [{ provider: claude, tools: read }]

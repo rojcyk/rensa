@@ -2,7 +2,14 @@ import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, assert, describe, expect, it, vi } from 'vitest'
-import { type EngineRepo, engineRepo, eventMatching, finished, ofType } from '../testing/engine.js'
+import {
+  dataOf,
+  type EngineRepo,
+  engineRepo,
+  eventMatching,
+  finished,
+  ofType,
+} from '../testing/engine.js'
 import { deadPid } from '../testing/processes.js'
 import { git } from '../testing/tmpRepo.js'
 import { Engine, type ProviderStatus, RensaError } from './index.js'
@@ -32,26 +39,149 @@ function fakeStatus(statuses: ProviderStatus[] | undefined): ProviderStatus | un
   return statuses?.find((s) => s.provider === 'fake')
 }
 
-describe('the working tree and the repository lock', () => {
-  it('refuses with DIRTY_TREE and writes no run when a writing chain starts on an uncommitted change', async () => {
-    const { open, repo, projectDir } = await setup(['three-step'])
-    const engine = await open()
-    await writeFile(path.join(repo.dir, 'scratch.txt'), 'work in progress\n')
+/**
+ * Writes `.rensa/<name>.yaml` before `open()`, so the chain is discovered
+ * and committed with the rest. Prompts come from the installed fixtures.
+ */
+async function addChain(projectDir: string, name: string, yaml: string): Promise<void> {
+  await writeFile(path.join(projectDir, `${name}.yaml`), yaml)
+}
 
-    const err = await rejection(engine.start('three-step', { kind: 'none' }))
+/** A shell step, then a write agent that pauses before it runs. */
+const WRITE_PAUSE_BEFORE = `description: A shell step, then a write agent that pauses first.
+steps:
+  - id: baseline
+    run: echo baseline-ok
+  - id: implement
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: write }]
+    pause: before
+`
+
+/** A write agent from the registry, narrowed to read by its step. */
+const NARROWED_TO_READ = `description: A write agent narrowed to read for its only step.
+agents:
+  impl:
+    provider: fake
+    tools: write
+steps:
+  - id: review
+    prompt: steps/review.md
+    agents: [{ from: impl }]
+    tools: read
+`
+
+/** The same write agent from the registry, used as is. */
+const REGISTRY_WRITE = `description: A write agent from the registry, not narrowed.
+agents:
+  impl:
+    provider: fake
+    tools: write
+steps:
+  - id: implement
+    prompt: steps/review.md
+    agents: [{ from: impl }]
+`
+
+async function scribble(repoDir: string): Promise<void> {
+  await writeFile(path.join(repoDir, 'scratch.txt'), 'work in progress\n')
+}
+
+describe('the working tree and the repository lock', () => {
+  it('refuses with DIRTY_TREE and writes no run when a chain with a write agent starts on an uncommitted change', async () => {
+    const { open, repo, projectDir, lockFile } = await setup(['agent-write'])
+    const engine = await open()
+    await scribble(repo.dir)
+
+    const err = await rejection(engine.start('agent-write', { kind: 'none' }))
+
+    expect([err.code, err.message, err.hint]).toEqual([
+      'DIRTY_TREE',
+      'chain `agent-write` has an agent with write tools, and the checkout has uncommitted changes',
+      'commit or stash your changes first',
+    ])
+    expect(existsSync(path.join(projectDir, 'runs'))).toBe(false)
+    expect(existsSync(lockFile)).toBe(false)
+  })
+
+  it('refuses with DIRTY_TREE when a chain with shell steps and a write agent starts on an uncommitted change', async () => {
+    const { open, repo, projectDir } = await setup(['read-only'])
+    await addChain(projectDir, 'write-pause', WRITE_PAUSE_BEFORE)
+    const engine = await open()
+    await scribble(repo.dir)
+
+    const err = await rejection(engine.start('write-pause', { kind: 'none' }))
 
     expect(err.code).toBe('DIRTY_TREE')
     expect(existsSync(path.join(projectDir, 'runs'))).toBe(false)
   })
 
-  it('refuses a second start with LOCKED, not DIRTY_TREE, while the untracked lock file of a live run exists', async () => {
-    const { open, start, repo } = await setup(['pause-before'])
+  it('runs a chain of shell steps and a read-only agent to completion on an uncommitted change', async () => {
+    const { open, start, repo } = await setup(['three-step'])
     const engine = await open()
+    await scribble(repo.dir)
+
+    const handle = await start(engine, 'three-step')
+    const { result, events } = await finished(handle)
+
+    expect(result.status).toBe('complete')
+    expect(ofType(events, 'step.finished').map((e) => [e.step, dataOf(e).status])).toEqual([
+      ['baseline', 'ok'],
+      ['review', 'ok'],
+      ['wrap-up', 'ok'],
+    ])
+    expect(await readFile(path.join(repo.dir, 'scratch.txt'), 'utf8')).toBe('work in progress\n')
+  })
+
+  it('still takes the lock for a shell chain on an uncommitted change, refusing a second start with LOCKED', async () => {
+    const { open, start, repo, lockFile } = await setup(['pause-before'])
+    const engine = await open()
+    await scribble(repo.dir)
     const first = await start(engine, 'pause-before')
+    await eventMatching(first, (e) => e.type === 'run.paused')
+    const held = JSON.parse(await readFile(lockFile, 'utf8')) as { run_id: string }
+
+    const err = await rejection(engine.start('pause-before', { kind: 'none' }))
+
+    expect(held.run_id).toBe(first.id)
+    expect(err.code).toBe('LOCKED')
+    expect(err.message).toContain(first.id)
+    first.abort()
+    await finished(first)
+  })
+
+  it('judges a write agent narrowed to read by its step as read-only and runs it on an uncommitted change', async () => {
+    const { open, start, repo, projectDir } = await setup(['read-only'])
+    await addChain(projectDir, 'narrowed', NARROWED_TO_READ)
+    const engine = await open()
+    await scribble(repo.dir)
+
+    const handle = await start(engine, 'narrowed')
+    const { result } = await finished(handle)
+
+    expect(result.status).toBe('complete')
+  })
+
+  it('refuses with DIRTY_TREE when the same registry write agent is used without narrowing', async () => {
+    const { open, repo, projectDir } = await setup(['read-only'])
+    await addChain(projectDir, 'registry-write', REGISTRY_WRITE)
+    const engine = await open()
+    await scribble(repo.dir)
+
+    const err = await rejection(engine.start('registry-write', { kind: 'none' }))
+
+    expect(err.code).toBe('DIRTY_TREE')
+  })
+
+  it('refuses a second start with LOCKED, not DIRTY_TREE, while the untracked lock file of a live write-agent run exists', async () => {
+    const { open, start, repo, projectDir } = await setup(['read-only'])
+    await addChain(projectDir, 'write-pause', WRITE_PAUSE_BEFORE)
+    const engine = await open()
+    const first = await start(engine, 'write-pause')
     await eventMatching(first, (e) => e.type === 'run.paused')
     const status = await git(repo.dir, ['status', '--porcelain', '--untracked-files=all'])
 
-    const err = await rejection(engine.start('pause-before', { kind: 'none' }))
+    const err = await rejection(engine.start('write-pause', { kind: 'none' }))
 
     expect(status).toBe('?? .rensa/lock\n')
     expect(err.code).toBe('LOCKED')
@@ -82,13 +212,13 @@ describe('the working tree and the repository lock', () => {
     expect(existsSync(lockFile)).toBe(false)
   })
 
-  it('does not count leftover lock temporary files as uncommitted changes when a writing chain starts', async () => {
-    const { open, start, projectDir } = await setup(['three-step'])
+  it('does not count leftover lock temporary files as uncommitted changes when a write-agent chain starts', async () => {
+    const { open, start, projectDir } = await setup(['agent-write'])
     const engine = await open()
     await writeFile(path.join(projectDir, 'lock.5f3a9c2e.tmp'), '{"pid":1}\n')
     await writeFile(path.join(projectDir, 'lock.recover.0b1c2d3e.tmp'), '{"pid":1}\n')
 
-    const handle = await start(engine, 'three-step')
+    const handle = await start(engine, 'agent-write')
     const { result } = await finished(handle)
 
     expect(result.status).toBe('complete')

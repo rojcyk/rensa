@@ -65,7 +65,8 @@ input box, borders styled deliberately.
   `default` when unset and `effort` is omitted when unset. Column
   widths: marker 2, id = longest id + 2, detail the rest.
 - Status line, one of:
-  - `working tree clean` in `muted` (only when `chain.writes`; read-only
+  - `working tree clean` in `muted` (only when the chain has an agent
+    with `tools: write`, the condition for step 08's dirty check; other
     chains show nothing here)
   - `! working tree has uncommitted changes; commit or stash to start`
     in `warn`

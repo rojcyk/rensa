@@ -143,10 +143,13 @@ export class Engine extends EventEmitter<{ providers: [ProviderStatus[]] }> {
       )
     }
     const { paths } = this.discovered
-    if (chain.writes && (await isDirty(paths.root))) {
+    // Only a write agent's edits would mix with the user's uncommitted
+    // ones; shell steps still take the lock (`chain.writes`) but may run
+    // on a dirty tree, so a chain can test and review a change in progress.
+    if (hasWriteAgent(chain) && (await isDirty(paths.root))) {
       throw new RensaError(
         'DIRTY_TREE',
-        `chain \`${name}\` writes to the checkout, which has uncommitted changes`,
+        `chain \`${name}\` has an agent with write tools, and the checkout has uncommitted changes`,
         paths.root,
         'commit or stash your changes first',
       )
@@ -260,6 +263,11 @@ async function validateLoaded(entry: LoadedChain): Promise<LoadedChain> {
   for (const adapter of allAdapters()) caps[adapter.provider] = adapter.capabilities()
   const error = validateWithAdapters(chain, caps) ?? (await validateSkills(chain))
   return error ? { name: entry.name, error } : entry
+}
+
+/** Any agent step whose resolved tools are `write`: the condition for refusing a dirty tree. */
+function hasWriteAgent(chain: ResolvedChain): boolean {
+  return chain.steps.some((s) => s.kind === 'agent' && s.agent.tools === 'write')
 }
 
 /**

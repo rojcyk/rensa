@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Provider } from '../config/types.js'
 import { RensaError } from '../errors.js'
+import { claudeAdapter } from './claude/index.js'
 import { fakeAdapter } from './fake/index.js'
 import { allAdapters, getAdapter } from './registry.js'
 import type { SpawnRequest } from './types.js'
@@ -10,6 +11,8 @@ afterEach(() => {
 })
 
 const REAL: Provider[] = ['claude', 'codex', 'grok']
+/** Providers whose adapter is still a stub; claude became real in step 10. */
+const STUBS: Provider[] = ['codex', 'grok']
 
 const request: SpawnRequest = {
   cwd: '/Users/alice/code/shop',
@@ -59,6 +62,10 @@ describe('looking up an adapter by provider', () => {
     expect(getAdapter(provider).provider).toBe(provider)
   })
 
+  it('returns the real claude adapter rather than a stub when claude is looked up', () => {
+    expect(getAdapter('claude')).toBe(claudeAdapter)
+  })
+
   it('returns the fake adapter when RENSA_DEV=1', () => {
     vi.stubEnv('RENSA_DEV', '1')
 
@@ -79,13 +86,13 @@ describe('looking up an adapter by provider', () => {
 })
 
 describe('stub adapters for providers not yet implemented', () => {
-  it.each(REAL)('reports %s as not installed when its availability is checked', async (p) => {
+  it.each(STUBS)('reports %s as not installed when its availability is checked', async (p) => {
     await expect(getAdapter(p).available({ PATH: '/usr/bin:/bin' })).resolves.toEqual({
       status: 'not_installed',
     })
   })
 
-  it.each(REAL)('throws an INTERNAL RensaError when %s is spawned', (provider) => {
+  it.each(STUBS)('throws an INTERNAL RensaError when %s is spawned', (provider) => {
     const spawn = () => getAdapter(provider).spawn(request)
 
     expect(spawn).toThrow(RensaError)
@@ -97,7 +104,7 @@ describe('stub adapters for providers not yet implemented', () => {
     )
   })
 
-  it.each(REAL)('throws an INTERNAL RensaError when %s parses output', async (provider) => {
+  it.each(STUBS)('throws an INTERNAL RensaError when %s parses output', async (provider) => {
     async function* lines() {
       yield '{"type":"result"}'
     }

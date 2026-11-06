@@ -1,0 +1,7 @@
+# Agents shared by this repository's chains. See docs/project.yaml.
+agents:
+  opus:
+    provider: claude
+    model: opus
+    tools: read
+    prompt: agents/reviewer.md

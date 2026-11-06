@@ -1,0 +1,13 @@
+description: Run the tests, then a read-only review of the working tree against base.
+steps:
+  - id: test
+    run: npm test
+    on_fail: continue
+
+  - id: review
+    prompt: steps/review.md
+    agents: [opus]
+    vars:
+      diff: $(git diff {{base}})
+      test_output: steps.test.output
+      test_passed: steps.test.passed
