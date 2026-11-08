@@ -1,12 +1,12 @@
 # Review Brief
 
-The one brief sent to all three reviewers in Phase 2. Fill the three placeholders, then send the text between the markers unchanged. Every reviewer gets identical wording so their findings are comparable.
+The one brief sent to both reviewers in Phase 2. Fill the three placeholders, then send the text between the markers unchanged. Every reviewer gets identical wording so their findings are comparable.
 
 | Placeholder | Fill with |
 |---|---|
 | `{{TASK}}` | The task statement from Phase 0, including the path of any plan step or spec file |
 | `{{IGNORE_PATHS}}` | Uncommitted paths that are not part of this task, or `none` |
-| `{{REVIEWER_ID}}` | `reviewer`, `codex`, or `grok` |
+| `{{REVIEWER_ID}}` | `reviewer` or `codex` |
 
 --- BEGIN BRIEF ---
 

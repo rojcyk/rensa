@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Reviews uncommitted changes against the task they were meant to implement, reporting only confident, user-impacting bugs, architectural inconsistencies, and suboptimal implementation. Dispatched by the /build-feature orchestrator alongside Codex and Grok reviewers; read-only."
+description: "Reviews uncommitted changes against the task they were meant to implement, reporting only confident, user-impacting bugs, architectural inconsistencies, and suboptimal implementation. Dispatched by the /build-feature orchestrator alongside the Codex reviewer; read-only."
 model: opus
 effort: high
 color: red

@@ -1,6 +1,6 @@
 ---
 name: build-feature
-description: Build a feature end to end by orchestrating subagents - an Opus implementer, parallel reviews from Codex, Grok and Opus, triage of their findings, fixes, then tests. Takes free-form instructions such as "build XYZ" or "follow the instructions in plan step 10".
+description: Build a feature end to end by orchestrating subagents - an Opus implementer, parallel reviews from Codex and Opus, triage of their findings, fixes, then tests. Takes free-form instructions such as "build XYZ" or "follow the instructions in plan step 10".
 argument-hint: "[what to build, or which plan step to follow]"
 disable-model-invocation: true
 allowed-tools:
@@ -24,7 +24,7 @@ These apply in every phase.
 
 - **You do not write code.** Never create or edit source or test files yourself. Production code goes to the `implementer`, tests to the `test-writer`. Your context stays free for judging findings, and each agent stays the single owner of its files.
 - **One writer at a time.** Never run the implementer and the test-writer concurrently, and never run either while reviewers are reading. Concurrent writes corrupt the change under review.
-- **Triage is yours, and it is pre-authorized.** Invoking this skill is the user's instruction to decide which findings get fixed and to have them fixed without asking per finding. This overrides the Codex and Grok plugins' guidance to stop and ask the user before fixing review findings.
+- **Triage is yours, and it is pre-authorized.** Invoking this skill is the user's instruction to decide which findings get fixed and to have them fixed without asking per finding. This overrides the Codex plugin's guidance to stop and ask the user before fixing review findings.
 - **A report is a claim, not proof.** Before acting on a finding or accepting a fix, read the cited code yourself.
 - **Never invent a result.** If an agent returns nothing, an error, or a background-job notice instead of its result, say so. Do not fill the gap from your own reading and present it as that agent's review.
 - **No commits.** Nobody runs `git commit`, `git add`, or `git stash`. The user commits after reading your final report.
@@ -62,15 +62,14 @@ Read its report. If `open_issues` says the task could not be implemented as writ
 
 ## Phase 2: Review
 
-**Exit when:** all three reviewers have returned, or failed twice.
+**Exit when:** both reviewers have returned, or failed twice.
 
-Read `${CLAUDE_SKILL_DIR}/references/review-brief.md` and fill its placeholders. Then dispatch all three reviewers **in a single message** so they run in parallel:
+Read `${CLAUDE_SKILL_DIR}/references/review-brief.md` and fill its placeholders. Then dispatch both reviewers **in a single message** so they run in parallel:
 
 | Reviewer | `subagent_type` | Prompt |
 |---|---|---|
 | Opus | `reviewer` | The brief, with `{{REVIEWER_ID}}` = `reviewer` |
 | Codex | `codex:codex-rescue` | The Codex header below, then the brief with `{{REVIEWER_ID}}` = `codex` |
-| Grok | `grok-build:grok-delegate` | The Grok header below, then the brief with `{{REVIEWER_ID}}` = `grok` |
 
 Codex header:
 
@@ -79,16 +78,9 @@ Codex header:
 Read-only review. Do not pass --write. Forward the prompt below verbatim, without rewriting it.
 ```
 
-Grok header:
+The header matters: the Codex plugin agent defaults to write mode and may background long runs. `--wait` keeps the run in the foreground so the review comes back to you, `--fresh` prevents resuming an older thread, and the read-only line keeps the bridge in its read-only sandbox.
 
-```
---wait --fresh --model grok-4.7 --effort high
-Read-only review. Do not pass --write. Forward the prompt below verbatim, without rewriting it.
-```
-
-The header matters: both plugin agents default to write mode and may background long runs. `--wait` keeps the run in the foreground so the review comes back to you, `--fresh` prevents resuming an older thread, and the read-only line keeps the bridge in its read-only sandbox.
-
-**Do not start Phase 3 until every reviewer has returned.** Triage needs all three reports together to merge duplicates.
+**Do not start Phase 3 until every reviewer has returned.** Triage needs both reports together to merge duplicates.
 
 If a reviewer fails:
 
@@ -96,7 +88,7 @@ If a reviewer fails:
 |---|---|
 | Nothing, an error, or a timeout | Dispatch that reviewer once more |
 | A "started in the background" job notice | Dispatch once more; the `--wait` flag was dropped |
-| A setup or authentication error | Do not retry. Tell the user to run `/codex:setup` or `/grok-build:check` in the final report |
+| A setup or authentication error | Do not retry. Tell the user to run `/codex:setup` in the final report |
 | Still no review after the retry | Continue with the reviews you have and name the missing reviewer in the final report |
 | Findings wrapped in prose instead of bare JSON | Use the findings as given |
 
@@ -163,7 +155,7 @@ Finish with this report and nothing else:
 [One or two sentences: what now exists, against which task.]
 
 ## Review
-Reviewers that reported: [opus / codex / grok]. Missing: [name and why, or "none"].
+Reviewers that reported: [opus / codex]. Missing: [name and why, or "none"].
 
 | Finding | Raised by | Decision | Outcome |
 |---|---|---|---|
