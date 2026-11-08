@@ -6,6 +6,7 @@ import type { Engine, RunHandle } from '../engine/index.js'
 import { HEADER_ROWS, Header } from './components/Header.js'
 import { Layout } from './components/Layout.js'
 import { type Action, useKeys } from './hooks/useKeys.js'
+import { Chains } from './screens/Chains.js'
 import { SizeProvider } from './size.js'
 import {
   createTeardown,
@@ -67,6 +68,9 @@ function App(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNode 
 
 type Overlay = 'confirm' | 'aborting'
 
+/** Rows the quit overlay takes as the footer. */
+const QUIT_OVERLAY_ROWS = 1
+
 /**
  * Screen state, the live run handles, and the quit confirmation. While
  * the overlay shows it holds the only active `useKeys`.
@@ -80,9 +84,14 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
     initial.name === 'run' ? [initial.run] : [],
   )
   const [overlay, setOverlay] = useState<Overlay | undefined>()
+  // The chain of the last detail or run screen; Chains selects it again when it mounts.
+  const [lastChain, setLastChain] = useState<string | undefined>(() =>
+    initial.name === 'chains' ? undefined : initial.chain,
+  )
   const branch = useBranch(engine)
 
   const navigate: Navigate = useCallback((next) => {
+    if (next.name !== 'chains') setLastChain(next.chain)
     if (next.name === 'run') {
       const handle = next.run
       setRuns((list) => (list.includes(handle) ? list : [...list, handle]))
@@ -115,12 +124,23 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
       }
       headerRows={HEADER_ROWS}
       body={
-        <EmptyScreen
-          screen={screen}
-          navigate={navigate}
-          requestQuit={requestQuit}
-          active={overlay === undefined}
-        />
+        screen.name === 'chains' ? (
+          <Chains
+            engine={engine}
+            navigate={navigate}
+            requestQuit={requestQuit}
+            active={overlay === undefined}
+            footerRows={overlay === undefined ? 0 : QUIT_OVERLAY_ROWS}
+            {...(lastChain !== undefined && { initialChain: lastChain })}
+          />
+        ) : (
+          <EmptyScreen
+            screen={screen}
+            navigate={navigate}
+            requestQuit={requestQuit}
+            active={overlay === undefined}
+          />
+        )
       }
       {...(overlay !== undefined && {
         footer: (
@@ -130,16 +150,16 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
             onCancel={() => setOverlay(undefined)}
           />
         ),
-        footerRows: 1,
+        footerRows: QUIT_OVERLAY_ROWS,
       })}
     />
   )
 }
 
 /**
- * Placeholder body until steps 12-14 add the screens: an empty body and
- * the keys every screen shares. `esc` leaves detail and run for chains
- * (a run keeps going) and quits from chains; ctrl+c quits from anywhere.
+ * Placeholder body for detail and run until steps 13-14 add those
+ * screens: an empty body and the keys every screen shares. `esc` leaves
+ * detail and run for chains (a run keeps going); ctrl+c quits.
  */
 function EmptyScreen(props: {
   screen: Screen
