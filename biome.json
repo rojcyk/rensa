@@ -17,6 +17,14 @@
   },
   "overrides": [
     {
+      "includes": ["src/engine/**", "src/tui/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "error" }
+        }
+      }
+    },
+    {
       "includes": ["src/engine/**"],
       "linter": {
         "rules": {

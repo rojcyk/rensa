@@ -1,7 +1,8 @@
 import { PROVIDERS, type Provider, type RunInput } from '../engine/index.js'
 
 export const USAGE = `usage:
-  rensa                                     open the TUI
+  rensa [<chain>]                           open the TUI, on the chain if given
+        [--fullscreen | --inline]           use the alternate screen, or not
   rensa run <chain> [input text]            run a chain with no UI
         [--input-file <path>]               read the input from a file
         [--base <ref>]                      override the chain's base ref
@@ -21,8 +22,16 @@ export interface RunArgs {
   output: OutputMode
 }
 
+/** `rensa [<chain>] [--fullscreen | --inline]`; a flag is present only when given. */
+export interface TuiArgs {
+  /** Opens on this chain's detail screen. */
+  chain?: string
+  fullscreen?: true
+  inline?: true
+}
+
 export type Command =
-  | { kind: 'tui' }
+  | ({ kind: 'tui' } & TuiArgs)
   | { kind: 'version' }
   | { kind: 'help' }
   | { kind: 'doctor' }
@@ -60,8 +69,42 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     case 'capture':
       return parseCapture(rest)
     default:
-      return fail(first.startsWith('-') ? `unknown flag ${first}` : `unknown command ${first}`)
+      return parseTui(argv)
   }
+}
+
+/** Anything that is not a command: an optional chain name and the mode flags. */
+function parseTui(argv: readonly string[]): ParsedArgs {
+  let chain: string | undefined
+  let fullscreen = false
+  let inline = false
+  for (const arg of argv) {
+    if (!arg.startsWith('-') || arg === '-') {
+      if (chain !== undefined) return fail(`unexpected argument ${arg}`)
+      chain = arg
+      continue
+    }
+    switch (arg) {
+      case '--help':
+      case '-h':
+        return ok({ kind: 'help' })
+      case '--fullscreen':
+        fullscreen = true
+        break
+      case '--inline':
+        inline = true
+        break
+      default:
+        return fail(`unknown flag ${splitFlag(arg)[0]}`)
+    }
+  }
+  if (fullscreen && inline) return fail('--fullscreen and --inline cannot be combined')
+  return ok({
+    kind: 'tui',
+    ...(chain !== undefined && { chain }),
+    ...(fullscreen && { fullscreen: true as const }),
+    ...(inline && { inline: true as const }),
+  })
 }
 
 function parseRun(argv: readonly string[]): ParsedArgs {

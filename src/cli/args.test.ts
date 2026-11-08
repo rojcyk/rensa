@@ -25,6 +25,22 @@ describe('commands without a run', () => {
     expect(parseArgs([])).toEqual(parsed({ kind: 'tui' }))
   })
 
+  it('opens the TUI on the chain when given a chain name alone', () => {
+    expect(parseArgs(['tdd-review'])).toEqual(parsed({ kind: 'tui', chain: 'tdd-review' }))
+  })
+
+  it.each([
+    [['--fullscreen'], { kind: 'tui', fullscreen: true }],
+    [['--inline'], { kind: 'tui', inline: true }],
+    [['tdd-review', '--fullscreen'], { kind: 'tui', chain: 'tdd-review', fullscreen: true }],
+    [['--inline', 'tdd-review'], { kind: 'tui', chain: 'tdd-review', inline: true }],
+  ] satisfies Array<[string[], Command]>)(
+    'opens the TUI with the mode flag when given %j',
+    (argv, command) => {
+      expect(parseArgs(argv)).toEqual(parsed(command))
+    },
+  )
+
   it.each([['--version'], ['-v']])('prints the version when given %s alone', (flag) => {
     expect(parseArgs([flag])).toEqual(parsed({ kind: 'version' }))
   })
@@ -146,8 +162,24 @@ describe('usage errors', () => {
     expect(parseArgs(['--verbose'])).toEqual(usageError('unknown flag --verbose'))
   })
 
-  it('reports an unknown command when the first argument is not a command', () => {
-    expect(parseArgs(['status'])).toEqual(usageError('unknown command status'))
+  it('opens the TUI on that chain rather than reporting an unknown command when the first argument is not a command', () => {
+    expect(parseArgs(['status'])).toEqual(parsed({ kind: 'tui', chain: 'status' }))
+  })
+
+  it('reports a usage error when both --fullscreen and --inline are given', () => {
+    expect(parseArgs(['--fullscreen', '--inline'])).toEqual(
+      usageError('--fullscreen and --inline cannot be combined'),
+    )
+  })
+
+  it('reports an unexpected argument when the TUI is given two chain names', () => {
+    expect(parseArgs(['tdd-review', 'quote-limits'])).toEqual(
+      usageError('unexpected argument quote-limits'),
+    )
+  })
+
+  it('reports an unknown flag when the TUI is given a flag it does not take', () => {
+    expect(parseArgs(['tdd-review', '--no-pause'])).toEqual(usageError('unknown flag --no-pause'))
   })
 
   it('reports a missing chain when run is given no positional', () => {

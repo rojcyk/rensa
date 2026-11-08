@@ -83,6 +83,16 @@ export class Engine extends EventEmitter<{ providers: [ProviderStatus[]] }> {
     return new Engine(discovered, validated, check)
   }
 
+  /** The repository root: the directory every run executes in. */
+  get root(): string {
+    return this.discovered.paths.root
+  }
+
+  /** The checked-out branch, or the commit sha when `HEAD` is detached. */
+  currentRef(): Promise<string> {
+    return currentRef(this.root)
+  }
+
   /** Statuses of the last completed check; undefined until the first completes. */
   providers(): ProviderStatus[] | undefined {
     return this.statuses

@@ -17,6 +17,7 @@ import { evaluateVars } from '../template/vars.js'
 import type { RunDir } from './dir.js'
 import type { EventLog } from './events.js'
 import type { Lock } from './lock.js'
+import { RingBuffer } from './ringBuffer.js'
 import { type RunJson, writeRunJson } from './runjson.js'
 import { TranscriptWriter } from './transcript.js'
 import type {
@@ -34,6 +35,8 @@ import type { RunError, RunResult } from './view.js'
 const SHELL_OUTPUT_MAX_BYTES = 16_384
 const STORAGE_HINT = 'check free space and permissions under .rensa/runs'
 const SCOPE = 'engine'
+/** Records kept in memory per transcript; older ones remain on disk only. */
+const TRANSCRIPT_CAPACITY = 5000
 
 export type RunInput =
   | { kind: 'none' }
@@ -65,6 +68,17 @@ export interface RunHandle {
   done: Promise<RunResult>
   /** Set at the moment `finished` fires. */
   result(): RunResult | undefined
+  /**
+   * The in-memory transcript of one agent (or `shell`) of one step,
+   * created on first use. Holds a record before `'transcript'` reports it.
+   */
+  transcript(step: string, label: string): RingBuffer<TranscriptRecord>
+  /**
+   * Every delta received for the key since its last record, concatenated;
+   * undefined once a record or the agent's end clears it. Includes a delta
+   * before `'delta'` reports it.
+   */
+  partial(step: string, label: string): string | undefined
   /** Every event so far, in `seq` order. */
   events(): ReadonlyArray<RunEvent>
   /** The history and a subscription, taken in one synchronous step. */
@@ -128,6 +142,8 @@ export class Runner implements RunHandle {
   private readonly notes: Array<{ text: string; from: number }> = []
   private readonly results: Record<string, StepResult> = {}
   private readonly writers = new Set<TranscriptWriter>()
+  private readonly buffers = new Map<string, RingBuffer<TranscriptRecord>>()
+  private readonly partials = new Map<string, string>()
   /** The first engine or storage error; once set the run stops advancing and ends `failed`. */
   private fatal: { error: RunError; step?: string } | undefined
   private finalResult: RunResult | undefined
@@ -171,6 +187,20 @@ export class Runner implements RunHandle {
 
   events(): ReadonlyArray<RunEvent> {
     return this.history.slice()
+  }
+
+  transcript(step: string, label: string): RingBuffer<TranscriptRecord> {
+    const key = transcriptKey(step, label)
+    let buffer = this.buffers.get(key)
+    if (!buffer) {
+      buffer = new RingBuffer<TranscriptRecord>(TRANSCRIPT_CAPACITY)
+      this.buffers.set(key, buffer)
+    }
+    return buffer
+  }
+
+  partial(step: string, label: string): string | undefined {
+    return this.partials.get(transcriptKey(step, label))
   }
 
   attach(listeners: RunListeners): {
@@ -519,6 +549,7 @@ export class Runner implements RunHandle {
               usage = event.usage
               break
             case 'done':
+              this.partials.delete(transcriptKey(step.id, label))
               done = event
               break
             default:
@@ -538,6 +569,8 @@ export class Runner implements RunHandle {
       } finally {
         clearTimeout(timer)
         dropKill()
+        // An agent that ended without a final event leaves no partial behind either.
+        this.partials.delete(transcriptKey(step.id, label))
       }
     }
     done ??= {
@@ -633,10 +666,14 @@ export class Runner implements RunHandle {
     r: NewTranscriptRecord,
   ): void {
     const record = writer.record(r)
+    this.transcript(step, label).push(record)
+    this.partials.delete(transcriptKey(step, label))
     for (const l of [...this.listeners]) call(() => l.transcript?.({ step, label, record }))
   }
 
   private delta(step: string, label: string, text: string): void {
+    const key = transcriptKey(step, label)
+    this.partials.set(key, (this.partials.get(key) ?? '') + text)
     for (const l of [...this.listeners]) call(() => l.delta?.({ step, label, text }))
   }
 
@@ -779,6 +816,11 @@ export class Runner implements RunHandle {
       return false
     }
   }
+}
+
+/** Step ids and labels never contain a NUL, so the pair maps to one key. */
+function transcriptKey(step: string, label: string): string {
+  return `${step}\u0000${label}`
 }
 
 /** A listener's error never reaches the runner. */

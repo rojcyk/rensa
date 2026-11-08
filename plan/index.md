@@ -15,12 +15,12 @@ separate) is enforced by a lint rule from step 01 onward.
 - [x] [03 Chain loading](03-chain-loading.md) — parse YAML, resolve agents across levels, expand `from:`, derive labels, validate, structured errors.
 - [x] [04 Templates and variables](04-templates-and-vars.md) — `{{name}}` rendering, namespace, `vars` evaluation, output-map rendering, user notes.
 - [x] [05 Run storage](05-run-storage.md) — run id, run directory, `run.json`, `events.jsonl` single writer and reader, transcript writer.
-- [ ] [06 Processes and shell steps](06-processes-and-shell-steps.md) — spawn in a process group, kill, timeout, line readers, env stripping, shell step executor, ordered synchronous shutdown hook.
-- [ ] [07 Adapter interface and fake provider](07-adapter-interface-and-fake.md) — adapter contract, normalized agent events, fixture format, fake adapter that replays fixtures.
-- [ ] [08 Engine](08-engine.md) — orchestrator: locks, availability check, sequential steps, pauses, user commands, event emission.
-- [ ] [09 Headless CLI](09-headless-cli.md) — `rensa run`, `rensa doctor`, line output, exit codes.
-- [ ] [10 Claude adapter](10-claude-adapter.md) — Claude Code headless integration, stream parsing, session resume, persona staging, auth check, first fixture capture.
-- [ ] [11 TUI foundation](11-tui-foundation.md) — Ink 8 terminal session (inline and fullscreen), sizing and layout, theme, header, key routing, store, engine bridge, engine-owned ring buffers, input box.
+- [x] [06 Processes and shell steps](06-processes-and-shell-steps.md) — spawn in a process group, kill, timeout, line readers, env stripping, shell step executor, ordered synchronous shutdown hook.
+- [x] [07 Adapter interface and fake provider](07-adapter-interface-and-fake.md) — adapter contract, normalized agent events, fixture format, fake adapter that replays fixtures.
+- [x] [08 Engine](08-engine.md) — orchestrator: locks, availability check, sequential steps, pauses, user commands, event emission.
+- [x] [09 Headless CLI](09-headless-cli.md) — `rensa run`, `rensa doctor`, line output, exit codes.
+- [x] [10 Claude adapter](10-claude-adapter.md) — Claude Code headless integration, stream parsing, session resume, persona staging, auth check, first fixture capture.
+- [x] [11 TUI foundation](11-tui-foundation.md) — Ink 8 terminal session (inline and fullscreen), sizing and layout, theme, header, key routing, store, engine bridge, engine-owned ring buffers, input box.
 - [ ] [11b Fullscreen measurement](11b-fullscreen-measurement.md) — human-executed after step 14: measure fullscreen with incremental rendering on three terminals, decide the default mode. Ticked after 14, not before.
 - [ ] [12 Chains screen](12-chains-screen.md) — provider line, chain list, annotations, recheck.
 - [ ] [13 Chain detail screen](13-chain-detail-screen.md) — info box, timeline with agents, ratchet, launch checks, input box, start.
