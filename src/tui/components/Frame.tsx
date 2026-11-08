@@ -10,11 +10,24 @@ export interface FrameProps {
   borderColor?: string
   /** Only on a selected or focused panel (step 14, rule D). */
   backgroundColor?: string
+  /**
+   * Behind the border cells, which `backgroundColor` excludes: the root's
+   * `theme.background` in fullscreen, so the border matches the fill.
+   */
+  borderBackgroundColor?: string
 }
 
 /** The rounded box: one column of content, one space of padding on each side. */
 export function Frame(props: FrameProps): ReactNode {
-  const { ref, children, width, height, borderColor = theme.dim, backgroundColor } = props
+  const {
+    ref,
+    children,
+    width,
+    height,
+    borderColor = theme.dim,
+    backgroundColor,
+    borderBackgroundColor,
+  } = props
   return (
     <Box
       ref={ref}
@@ -25,6 +38,7 @@ export function Frame(props: FrameProps): ReactNode {
       {...(width !== undefined && { width })}
       {...(height !== undefined && { height })}
       {...(backgroundColor !== undefined && { backgroundColor })}
+      {...(borderBackgroundColor !== undefined && { borderBackgroundColor })}
     >
       {children}
     </Box>

@@ -333,3 +333,179 @@ describe('provider checks started by open', () => {
     ])
   })
 })
+
+describe('the launch check before a start', () => {
+  it('reports ok with working tree clean when a chain with a write agent is checked on a clean tree', async () => {
+    const { open } = await setup(['agent-write'])
+    const engine = await open()
+
+    const check = await engine.preflight('agent-write')
+
+    expect(check).toEqual({ ok: true, message: 'working tree clean' })
+  })
+
+  it('reports ok with no message when a read-only chain is checked on a clean tree', async () => {
+    const { open } = await setup(['read-only'])
+    const engine = await open()
+
+    const check = await engine.preflight('read-only')
+
+    expect(check).toEqual({ ok: true })
+  })
+
+  it('reports the dirty tree as a warning and writes nothing when a write-agent chain is checked on an uncommitted change', async () => {
+    const { open, repo, projectDir, lockFile } = await setup(['agent-write'])
+    const engine = await open()
+    await scribble(repo.dir)
+
+    const check = await engine.preflight('agent-write')
+
+    expect(check).toEqual({
+      ok: false,
+      message: 'working tree has uncommitted changes; commit or stash to start',
+      level: 'warn',
+    })
+    expect(existsSync(path.join(projectDir, 'runs'))).toBe(false)
+    expect(existsSync(lockFile)).toBe(false)
+  })
+
+  it('reports ok when a chain of shell steps and a read-only agent is checked on an uncommitted change', async () => {
+    const { open, repo } = await setup(['three-step'])
+    const engine = await open()
+    await scribble(repo.dir)
+
+    const check = await engine.preflight('three-step')
+
+    expect(check).toEqual({ ok: true })
+  })
+
+  it('reports a missing provider as an error when its CLI is not installed', async () => {
+    const { open } = await setup(['read-only'])
+    vi.stubEnv('RENSA_FAKE_AVAILABILITY', 'not_installed')
+    const engine = await open()
+
+    const check = await engine.preflight('read-only')
+
+    expect(check).toEqual({
+      ok: false,
+      message: 'fake is not installed; this chain cannot start',
+      level: 'err',
+    })
+  })
+
+  it('reports a logged-out provider with its login hint when its CLI is not logged in', async () => {
+    const { open } = await setup(['read-only'])
+    vi.stubEnv('RENSA_FAKE_AVAILABILITY', 'not_logged_in')
+    const engine = await open()
+
+    const check = await engine.preflight('read-only')
+
+    expect(check).toEqual({
+      ok: false,
+      message: 'fake is not logged in (fake login); this chain cannot start',
+      level: 'err',
+    })
+  })
+
+  it('waits for the provider check in flight when preflight follows open at once', async () => {
+    const { repo } = await setup(['read-only'])
+    vi.stubEnv('RENSA_FAKE_AVAILABLE_DELAY_MS', '300')
+    vi.stubEnv('RENSA_FAKE_AVAILABILITY', 'not_installed')
+
+    const engine = await Engine.open(repo.dir)
+    const check = await engine.preflight('read-only')
+
+    expect(check).toEqual({
+      ok: false,
+      message: 'fake is not installed; this chain cannot start',
+      level: 'err',
+    })
+  })
+
+  it('names the live run holding the lock when a writing chain is checked during another run', async () => {
+    const { open, start } = await setup(['pause-before'])
+    const engine = await open()
+    const first = await start(engine, 'pause-before')
+    await eventMatching(first, (e) => e.type === 'run.paused')
+
+    const check = await engine.preflight('pause-before')
+
+    expect(check).toEqual({
+      ok: false,
+      message: `another run is active: ${first.id}`,
+      level: 'err',
+    })
+    first.abort()
+    await finished(first)
+  })
+
+  it('reports the lock, not the dirty tree, while the untracked lock file of a live write-agent run exists', async () => {
+    const { open, start, projectDir } = await setup(['read-only'])
+    await addChain(projectDir, 'write-pause', WRITE_PAUSE_BEFORE)
+    const engine = await open()
+    const first = await start(engine, 'write-pause')
+    await eventMatching(first, (e) => e.type === 'run.paused')
+
+    const check = await engine.preflight('write-pause')
+
+    expect(check).toEqual({
+      ok: false,
+      message: `another run is active: ${first.id}`,
+      level: 'err',
+    })
+    first.abort()
+    await finished(first)
+  })
+
+  it('reports ok and leaves the lock file alone when the lock was left by a dead process', async () => {
+    const { open, lockFile } = await setup(['pause-before'])
+    const engine = await open()
+    const stale = `${JSON.stringify({
+      pid: deadPid(),
+      token: 'stale-token-9c2e',
+      run_id: 'old-run-7d3a',
+      started_at: '2026-11-01T08:00:00.000Z',
+    })}\n`
+    await writeFile(lockFile, stale)
+
+    const check = await engine.preflight('pause-before')
+
+    expect(check).toEqual({ ok: true })
+    expect(await readFile(lockFile, 'utf8')).toBe(stale)
+  })
+
+  it('reports ok again once the run that held the lock has finished', async () => {
+    const { open, start } = await setup(['pause-before'])
+    const engine = await open()
+    const first = await start(engine, 'pause-before')
+    await eventMatching(first, (e) => e.type === 'run.paused')
+    first.abort()
+    await finished(first)
+
+    const check = await engine.preflight('pause-before')
+
+    expect(check).toEqual({ ok: true })
+  })
+
+  it('reports the same message start would throw, as an error, when no chain has the name', async () => {
+    const { open } = await setup(['read-only'])
+    const engine = await open()
+    const thrown = await rejection(engine.start('no-such-chain', { kind: 'none' }))
+
+    const check = await engine.preflight('no-such-chain')
+
+    expect(check).toEqual({ ok: false, message: thrown.message, level: 'err' })
+  })
+
+  it('leaves nothing that blocks a start when a write-agent chain is checked ok and then started', async () => {
+    const { open, start } = await setup(['agent-write'])
+    const engine = await open()
+
+    const check = await engine.preflight('agent-write')
+    const handle = await start(engine, 'agent-write')
+    const { result } = await finished(handle)
+
+    expect(check.ok).toBe(true)
+    expect(result.status).toBe('complete')
+  })
+})

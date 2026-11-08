@@ -13,7 +13,7 @@ import { createRunDir, type RunDir } from './run/dir.js'
 import { EventLog } from './run/events.js'
 import { commitOf, currentRef, isDirty } from './run/git.js'
 import { newRunId } from './run/id.js'
-import { acquireLock, type Lock } from './run/lock.js'
+import { acquireLock, type Lock, lockHolder } from './run/lock.js'
 import { type RunJson, writeRunJson } from './run/runjson.js'
 import { type RunHandle, type RunInput, Runner } from './run/runner.js'
 import { validateSkills } from './template/skills.js'
@@ -45,6 +45,19 @@ export interface StartOptions {
   headless?: boolean
   /** Overrides the chain's and project's base. */
   base?: string
+}
+
+/**
+ * Whether a chain can start right now, from the checks `start()` makes
+ * before it writes anything. `message` is plain copy for the frontend:
+ * the first failing check when `ok` is false, or `working tree clean`
+ * for a chain whose dirty check passed. `level` is set only when `ok` is
+ * false: `warn` for a dirty tree, `err` otherwise.
+ */
+export interface LaunchCheck {
+  ok: boolean
+  message?: string
+  level?: 'warn' | 'err'
 }
 
 interface LoadedChain {
@@ -86,6 +99,11 @@ export class Engine extends EventEmitter<{ providers: [ProviderStatus[]] }> {
   /** The repository root: the directory every run executes in. */
   get root(): string {
     return this.discovered.paths.root
+  }
+
+  /** The rensa version; `dev` outside a build. */
+  get version(): string {
+    return RENSA_VERSION
   }
 
   /** The checked-out branch, or the commit sha when `HEAD` is detached. */
@@ -201,6 +219,44 @@ export class Engine extends EventEmitter<{ providers: [ProviderStatus[]] }> {
     })
     runner.begin()
     return runner
+  }
+
+  /**
+   * The checks `start()` performs that do not depend on the input, in
+   * the same order and without side effects: the chain loads, its
+   * providers are ready (after the provider check in flight completes),
+   * the tree is clean when an agent writes, and no live run holds the
+   * lock when the chain writes. Cheap: `git status` is the only
+   * subprocess. Never throws a `RensaError`; reports it as the check.
+   */
+  async preflight(name: string): Promise<LaunchCheck> {
+    let chain: ResolvedChain
+    try {
+      chain = this.chain(name)
+    } catch (err) {
+      if (err instanceof RensaError) return { ok: false, message: err.message, level: 'err' }
+      throw err
+    }
+    await this.checking
+    const [missing] = this.missingProviders(chain)
+    if (missing) return { ok: false, message: unavailableMessage(missing), level: 'err' }
+    const { paths } = this.discovered
+    const writeAgent = hasWriteAgent(chain)
+    if (writeAgent && (await isDirty(paths.root))) {
+      return {
+        ok: false,
+        message: 'working tree has uncommitted changes; commit or stash to start',
+        level: 'warn',
+      }
+    }
+    if (chain.writes) {
+      const holder = await lockHolder(paths.projectDir)
+      if (holder) {
+        const run = holder.runId ?? `pid ${holder.pid}`
+        return { ok: false, message: `another run is active: ${run}`, level: 'err' }
+      }
+    }
+    return writeAgent ? { ok: true, message: 'working tree clean' } : { ok: true }
   }
 
   private track(check: Promise<ProviderStatus[]>): Promise<ProviderStatus[]> {
@@ -323,6 +379,18 @@ function unavailable({ provider, availability }: ProviderStatus): RensaError {
       )
     case 'ready':
       return new RensaError('INTERNAL', `${provider} is ready but was reported missing`)
+  }
+}
+
+/** `preflight`'s line for a provider that is not ready. */
+function unavailableMessage({ provider, availability }: ProviderStatus): string {
+  switch (availability.status) {
+    case 'not_logged_in':
+      return `${provider} is not logged in (${availability.hint}); this chain cannot start`
+    case 'not_installed':
+      return `${provider} is not installed; this chain cannot start`
+    case 'ready':
+      return `${provider} is ready but was reported missing`
   }
 }
 

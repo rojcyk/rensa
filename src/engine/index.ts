@@ -29,7 +29,7 @@ export {
 } from './config/types.js'
 export { validateWithAdapters } from './config/validate.js'
 export { type DiagEntry, diag, drainDiag, onDiag } from './diag.js'
-export { type ChainSummary, Engine, type StartOptions } from './engine.js'
+export { type ChainSummary, Engine, type LaunchCheck, type StartOptions } from './engine.js'
 export { RensaError, type RensaErrorCode } from './errors.js'
 export { onInterrupt, onShutdown } from './process/shutdown.js'
 export { type AgentFileName, openRunDir, type RunDir } from './run/dir.js'

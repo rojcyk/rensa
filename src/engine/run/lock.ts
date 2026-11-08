@@ -125,6 +125,20 @@ export async function acquireLock(projectDir: string, runId: string): Promise<Lo
 }
 
 /**
+ * The live holder of the repository lock, read without taking it: what
+ * `acquireLock` would refuse with `LOCKED`. A missing, unreadable or
+ * stale lock (dead pid) has no holder, since acquisition would replace it.
+ */
+export async function lockHolder(
+  projectDir: string,
+): Promise<{ pid: number; runId?: string } | undefined> {
+  const seen = await inspect(lockPath(projectDir))
+  if (seen.state !== 'present' || !isAlive(seen.owner.pid)) return undefined
+  const { pid, run_id: runId } = seen.owner
+  return { pid, ...(typeof runId === 'string' && { runId }) }
+}
+
+/**
  * Runs `fn` while holding `lock.recover`. Waits while a live process holds
  * it. One left by a dead process is not broken automatically: breaking it
  * safely would need the same mutual exclusion one level up.

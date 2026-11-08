@@ -166,3 +166,48 @@ describe('the visible window of the value, in terminal cells', () => {
     expect(inputWindow({ value: 'abc', caret: 3 }, 0)).toEqual({ text: '', caretCell: 0 })
   })
 })
+
+describe('the prompt and the one-row line variant', () => {
+  function promptBox(props: {
+    state: InputState
+    variant?: 'frame' | 'line'
+    width?: number
+  }): string[] {
+    const view = render(
+      <InputBox
+        state={props.state}
+        onPaste={() => {}}
+        prompt="›"
+        focused
+        enabled
+        width={props.width ?? 30}
+        {...(props.variant !== undefined && { variant: props.variant })}
+      />,
+    )
+    unmount = view.unmount
+    return stripVTControlCharacters(view.lastFrame() ?? '')
+      .split('\n')
+      .map((l) => l.trimEnd())
+  }
+
+  it('renders one borderless row with the prompt, a space and the text when variant is line', () => {
+    const lines = promptBox({ state: { value: 'fix', caret: 3 }, variant: 'line' })
+
+    expect(lines).toEqual([' › fix'])
+  })
+
+  it('renders three framed rows with the prompt before the text when the variant is the default frame', () => {
+    const lines = promptBox({ state: { value: 'fix', caret: 3 }, width: 14 })
+
+    expect(lines).toEqual(['╭────────────╮', '│ › fix      │', '╰────────────╯'])
+  })
+
+  it('scrolls the text in the cells after the prompt when the value is longer than the box', () => {
+    const lines = promptBox({
+      state: { value: 'abcdefghijklmnopqrstuvwxyz', caret: 26 },
+      width: 14,
+    })
+
+    expect(lines[1]).toBe('│ › tuvwxyz  │')
+  })
+})

@@ -1,4 +1,5 @@
 import {
+  Box,
   type DOMElement,
   measureElement,
   Text,
@@ -13,29 +14,57 @@ import { theme } from '../theme.js'
 import { type InputState, insertText } from './editInput.js'
 import { Frame } from './Frame.js'
 
-/** Border and padding on each side: the text gets `width − 4` cells. */
-const CHROME_COLS = 4
-/** Offset of the first text cell from the frame's top-left corner. */
-const TEXT_OFFSET = { x: 2, y: 1 }
+/**
+ * Per presentation: the columns taken besides the text (border and
+ * padding on each side for `frame`, padding only for `line`) and the
+ * offset of the first text cell from the box's top-left corner.
+ */
+const CHROME = {
+  frame: { cols: 4, offset: { x: 2, y: 1 } },
+  line: { cols: 2, offset: { x: 1, y: 0 } },
+} as const
+
+export type InputBoxVariant = keyof typeof CHROME
 
 export interface InputBoxProps {
   state: InputState
   /** A paste, newlines collapsed to spaces, already applied at the caret. */
   onPaste(next: InputState): void
   placeholder?: string
+  /** Drawn in `muted` before the text, followed by one space; the text scrolls after it. */
+  prompt?: string
   focused: boolean
   enabled: boolean
   width: number
+  /** Behind the border; `theme.background` in fullscreen (see `Frame`). */
+  borderBackgroundColor?: string
+  /**
+   * `frame` (default): three rows, the text inside a rounded border.
+   * `line`: one borderless row, for a footer that `short` compact mode
+   * collapses to one row, where a frame would show only its top border.
+   */
+  variant?: InputBoxVariant
 }
 
 /**
- * A one-row framed text input. Controlled and keyless: the screen owns
+ * A one-row text input, framed or as a bare line. Controlled and keyless: the screen owns
  * the state and feeds keys through `editInput` from its `useKeys`; this
  * mounts no useInput. While focused it takes pastes as one string and
  * places the terminal's own cursor at the caret.
  */
 export function InputBox(props: InputBoxProps): ReactNode {
-  const { state, onPaste, placeholder, focused, enabled, width } = props
+  const {
+    state,
+    onPaste,
+    placeholder,
+    prompt,
+    focused,
+    enabled,
+    width,
+    borderBackgroundColor,
+    variant = 'frame',
+  } = props
+  const chrome = CHROME[variant]
   const { isRawModeSupported } = useStdin()
   const frameRef = useRef<DOMElement>(null)
   const metrics = useBoxMetrics(frameRef)
@@ -45,14 +74,18 @@ export function InputBox(props: InputBoxProps): ReactNode {
     isActive: focused && isRawModeSupported,
   })
 
-  const { text: visible, caretCell } = inputWindow(state, Math.max(1, width - CHROME_COLS))
+  const promptCols = prompt === undefined ? 0 : stringWidth(prompt) + 1
+  const { text: visible, caretCell } = inputWindow(
+    state,
+    Math.max(1, width - chrome.cols - promptCols),
+  )
 
   const frame = frameRef.current
   if (focused && metrics.hasMeasured && frame) {
     const origin = measureElement(frame)
     setCursorPosition({
-      x: origin.x + TEXT_OFFSET.x + caretCell,
-      y: origin.y + TEXT_OFFSET.y,
+      x: origin.x + chrome.offset.x + promptCols + caretCell,
+      y: origin.y + chrome.offset.y,
     })
   } else {
     setCursorPosition(undefined)
@@ -60,16 +93,43 @@ export function InputBox(props: InputBoxProps): ReactNode {
 
   const showPlaceholder = state.value === '' && placeholder !== undefined
   const color = !enabled ? theme.dim : showPlaceholder ? theme.muted : theme.text
+  const content =
+    prompt === undefined ? (
+      <Text color={color} wrap="truncate-end">
+        {showPlaceholder ? placeholder : visible}
+      </Text>
+    ) : (
+      <Text wrap="truncate-end">
+        <Text color={enabled ? theme.muted : theme.dim}>{`${prompt} `}</Text>
+        <Text color={color}>{showPlaceholder ? placeholder : visible}</Text>
+      </Text>
+    )
+  const background = focused ? { backgroundColor: theme.selection } : {}
+
+  if (variant === 'line') {
+    return (
+      <Box
+        ref={frameRef}
+        width={width}
+        height={1}
+        flexShrink={0}
+        paddingX={1}
+        overflow="hidden"
+        {...background}
+      >
+        {content}
+      </Box>
+    )
+  }
   return (
     <Frame
       ref={frameRef}
       width={width}
       height={3}
-      {...(focused && { backgroundColor: theme.selection })}
+      {...background}
+      {...(borderBackgroundColor !== undefined && { borderBackgroundColor })}
     >
-      <Text color={color} wrap="truncate-end">
-        {showPlaceholder ? placeholder : visible}
-      </Text>
+      {content}
     </Frame>
   )
 }

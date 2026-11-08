@@ -2,11 +2,12 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { Box, Text, useWindowSize } from 'ink'
 import { type ReactNode, useCallback, useContext, useEffect, useState } from 'react'
-import type { Engine, RunHandle } from '../engine/index.js'
+import type { Engine, RunHandle, RunResult } from '../engine/index.js'
 import { HEADER_ROWS, Header } from './components/Header.js'
 import { Layout } from './components/Layout.js'
 import { type Action, useKeys } from './hooks/useKeys.js'
 import { Chains } from './screens/Chains.js'
+import { Detail } from './screens/Detail.js'
 import { SizeProvider } from './size.js'
 import {
   createTeardown,
@@ -112,16 +113,40 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
     void Promise.all(live.map((run) => run.done)).then(() => quit())
   }
 
+  const header = (
+    <Header
+      branch={branch}
+      path={homeRelative(engine.root)}
+      {...(screen.name !== 'chains' && { mode: 'in place' as const, right: screen.chain })}
+    />
+  )
+  const quitOverlay = overlay !== undefined && (
+    <QuitOverlay state={overlay} onConfirm={confirmQuit} onCancel={() => setOverlay(undefined)} />
+  )
+
+  // The detail screen lays out its own footer, the input area, so it takes the Layout.
+  if (screen.name === 'detail') {
+    return (
+      <Detail
+        key={screen.chain}
+        engine={engine}
+        chain={screen.chain}
+        navigate={navigate}
+        requestQuit={requestQuit}
+        active={overlay === undefined}
+        mode={mode}
+        header={header}
+        {...(quitOverlay !== false && {
+          overlay: { footer: quitOverlay, rows: QUIT_OVERLAY_ROWS },
+        })}
+      />
+    )
+  }
+
   return (
     <Layout
       mode={mode}
-      header={
-        <Header
-          branch={branch}
-          path={homeRelative(engine.root)}
-          {...(screen.name !== 'chains' && { mode: 'in place' as const, right: screen.chain })}
-        />
-      }
+      header={header}
       headerRows={HEADER_ROWS}
       body={
         screen.name === 'chains' ? (
@@ -134,51 +159,57 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
             {...(lastChain !== undefined && { initialChain: lastChain })}
           />
         ) : (
-          <EmptyScreen
-            screen={screen}
+          <RunPlaceholder
+            key={screen.run.id}
+            run={screen.run}
             navigate={navigate}
             requestQuit={requestQuit}
             active={overlay === undefined}
           />
         )
       }
-      {...(overlay !== undefined && {
-        footer: (
-          <QuitOverlay
-            state={overlay}
-            onConfirm={confirmQuit}
-            onCancel={() => setOverlay(undefined)}
-          />
-        ),
-        footerRows: QUIT_OVERLAY_ROWS,
-      })}
+      {...(quitOverlay !== false && { footer: quitOverlay, footerRows: QUIT_OVERLAY_ROWS })}
     />
   )
 }
 
 /**
- * Placeholder body for detail and run until steps 13-14 add those
- * screens: an empty body and the keys every screen shares. `esc` leaves
- * detail and run for chains (a run keeps going); ctrl+c quits.
+ * Placeholder run screen until step 14: the run id, then the run's end
+ * state once `done` resolves. `esc` goes back to chains while the run
+ * keeps going; ctrl+c quits.
  */
-function EmptyScreen(props: {
-  screen: Screen
+function RunPlaceholder(props: {
+  run: RunHandle
   navigate: Navigate
   requestQuit(): void
   active: boolean
 }): ReactNode {
-  const { screen, navigate, requestQuit, active } = props
+  const { run, navigate, requestQuit, active } = props
+  const [result, setResult] = useState<RunResult | undefined>(() => run.result())
+  useEffect(() => {
+    let live = true
+    void run.done.then((r) => {
+      if (live) setResult(r)
+    })
+    return () => {
+      live = false
+    }
+  }, [run])
   useKeys(
     (action: Action | 'text') => {
       if (action === 'quit') requestQuit()
-      else if (action === 'esc') {
-        if (screen.name === 'chains') requestQuit()
-        else navigate({ name: 'chains' })
-      }
+      else if (action === 'esc') navigate({ name: 'chains' })
     },
     { active },
   )
-  return null
+  let color: string = theme.muted
+  if (result !== undefined) color = result.status === 'complete' ? theme.ok : theme.err
+  return (
+    <Box flexDirection="column" flexShrink={0} paddingTop={1}>
+      <Text color={theme.text} wrap="truncate-end">{`  run ${run.id}`}</Text>
+      <Text color={color} wrap="truncate-end">{`  ${result?.status ?? 'running'}`}</Text>
+    </Box>
+  )
 }
 
 /** `abort the run? y/n`, then `aborting…` while the runs drain. */
