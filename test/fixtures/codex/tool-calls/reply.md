@@ -1,0 +1,2 @@
+- [LICENSE](/Users/user/Repos/rensa/LICENSE) grants permission to use, modify, and distribute the software under the MIT License, requiring preservation of its notices and disclaiming warranties and liability.
+- [biome.json](/Users/user/Repos/rensa/biome.json) configures code formatting and linting, including style conventions, file exclusions, console restrictions, and import boundaries between the engine, TUI, and CLI.

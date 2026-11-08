@@ -29,6 +29,7 @@ import type {
   TranscriptRecord,
   Usage,
 } from './types.js'
+import { turnUsage } from './usage.js'
 import type { RunError, RunResult } from './view.js'
 
 /** Bytes of a shell step's output kept in `steps.<id>.output`. */
@@ -504,8 +505,11 @@ export class Runner implements RunHandle {
     let usage: Usage | undefined
     let timedOut = false
     let proc: AgentProcess | undefined
+    let sessionTotals = false
     try {
-      proc = getAdapter(agent.provider).spawn({
+      const adapter = getAdapter(agent.provider)
+      sessionTotals = adapter.capabilities().usage === 'session_total'
+      proc = adapter.spawn({
         cwd: this.o.cwd,
         env: this.stepEnv(step.id),
         message,
@@ -594,7 +598,8 @@ export class Runner implements RunHandle {
         : done.exitCode === 0 && !done.error
           ? 'ok'
           : 'failed'
-    const finalUsage = done.usage ?? usage
+    const reported = done.usage ?? usage
+    const finalUsage = sessionTotals ? this.turnUsage(step, session, reported) : reported
     this.emit({
       type: 'agent.finished',
       step: step.id,
@@ -616,6 +621,45 @@ export class Runner implements RunHandle {
       text: done.reply,
     }
     return { status, ...(done.exitCode !== null && { exitCode: done.exitCode }) }
+  }
+
+  /**
+   * The usage `agent.finished` reports for one turn of a provider whose
+   * capabilities say `usage: 'session_total'` (Codex): it reports the
+   * session's running totals, where the others report the turn's own
+   * usage and skip this. For a named agent the totals are
+   * kept in run.json (`session_usage`) and a resumed turn reports the
+   * difference from the previous ones, so every provider's numbers mean
+   * the same. The subtraction is here, not in the adapter, because only
+   * the engine knows a session's earlier turns; the parser stays pure. The
+   * baseline moves only when this turn reported totals; a turn that failed
+   * or was killed before reporting any leaves it as it was.
+   */
+  private turnUsage(
+    step: AgentStep,
+    session: { resume: boolean },
+    reported: Usage | undefined,
+  ): Usage | undefined {
+    const { agent } = step
+    // A fresh agent's session has one turn, so its totals are the turn's.
+    if (agent.session !== 'named' || agent.name === undefined) return reported
+    const baselines = this.o.runJson.session_usage
+    const baseline = session.resume ? baselines?.[agent.name] : undefined
+    if (reported === undefined) {
+      // A first use that reported nothing leaves no baseline for its session.
+      if (!session.resume && baselines) delete baselines[agent.name]
+      return undefined
+    }
+    this.o.runJson.session_usage = { ...baselines, [agent.name]: reported }
+    if (baseline === undefined) return reported
+    const { usage, clamped } = turnUsage(reported, baseline)
+    if (clamped) {
+      diag(
+        SCOPE,
+        `${step.id}/${agent.label}: session usage totals fell below the previous turn's; clamped at 0`,
+      )
+    }
+    return usage
   }
 
   /** Named agents resume their session after the first use; fresh ones never do. */

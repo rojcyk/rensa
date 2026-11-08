@@ -9,3 +9,7 @@ agents:
     provider: grok
     tools: read
     prompt: agents/reviewer.md
+  codex:
+    provider: codex
+    tools: read
+    prompt: agents/reviewer.md

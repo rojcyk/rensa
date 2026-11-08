@@ -120,6 +120,32 @@ describe('writing and reading run.json', () => {
   })
 })
 
+describe('session usage baselines in run.json', () => {
+  it('reads back the session_usage totals when a run recorded them for a named agent', async () => {
+    const withBaselines = runJson({
+      sessions: { reviewer: '019a2f4e-7c1d-7b3a-9e52-4d8f1c6a0b93' },
+      session_usage: { reviewer: { input: 4426, output: 166, cache_read: 29_824 } },
+    })
+
+    await writeRunJson(file, withBaselines)
+
+    expect(await readRunJson(file)).toStrictEqual(withBaselines)
+  })
+
+  it('loads a run.json written before session_usage existed, with no baselines', async () => {
+    // The shape step 15 wrote: no session_usage key at all.
+    const { session_usage: _, ...old } = runJson({
+      sessions: { reviewer: '019a2f4e-7c1d-7b3a-9e52-4d8f1c6a0b93' },
+    })
+    await writeFile(file, `${JSON.stringify(old, null, 2)}\n`)
+
+    const loaded = await readRunJson(file)
+
+    expect(loaded).toStrictEqual(old)
+    expect(loaded.session_usage).toBe(undefined)
+  })
+})
+
 describe('reading a damaged run.json', () => {
   it('throws RensaError INTERNAL naming the file when the content is not valid JSON', async () => {
     await writeFile(file, '{"id":"2026-10-28_0912_tdd-review_7f3a","chain":')

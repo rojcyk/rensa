@@ -1,4 +1,4 @@
-description: Run the tests, then read-only reviews of the working tree against base by Claude and Grok.
+description: Run the tests, then read-only reviews of the working tree against base by Claude, Grok and Codex.
 steps:
   - id: test
     run: npm test
@@ -15,6 +15,14 @@ steps:
   - id: review-grok
     prompt: steps/review.md
     agents: [grok]
+    vars:
+      diff: $(git diff {{base}})
+      test_output: steps.test.output
+      test_passed: steps.test.passed
+
+  - id: review-codex
+    prompt: steps/review.md
+    agents: [codex]
     vars:
       diff: $(git diff {{base}})
       test_output: steps.test.output

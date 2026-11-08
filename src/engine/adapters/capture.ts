@@ -7,6 +7,7 @@ import { RensaError } from '../errors.js'
 import { childEnv } from '../process/env.js'
 import type { TranscriptRecord } from '../run/types.js'
 import { buildArgv as claudeArgv } from './claude/argv.js'
+import { buildArgv as codexArgv } from './codex/argv.js'
 import { buildArgv as grokArgv, stagedPromptFor } from './grok/argv.js'
 import { getAdapter } from './registry.js'
 import type { AgentEvent, DoneEvent, Parser, SpawnRequest } from './types.js'
@@ -22,6 +23,7 @@ const STDERR_PREFIX = 'stderr: '
 /** The command line each provider's adapter runs, for `meta.json`; absent: not recorded. */
 const ARGV: Partial<Record<Provider, (req: SpawnRequest) => string[]>> = {
   claude: (req) => claudeArgv(req, {}),
+  codex: (req) => codexArgv(req),
   // The staging decision the adapter acts on, so `--prompt-file` is recorded when it was used.
   grok: (req) => grokArgv(req, stagedPromptFor(req)),
 }

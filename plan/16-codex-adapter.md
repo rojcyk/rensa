@@ -31,24 +31,30 @@ selection ignored on ChatGPT login'` for the doctor output.
 
 ## argv
 
-Always: `codex exec --json --cd <cwd> --skip-git-repo-check`
-(include `--skip-git-repo-check` only if the installed version requires
-it when the cwd is a repo subdirectory; otherwise omit).
+Always: `codex exec --json --cd <cwd>`. Verified on codex-cli 0.166.0:
+`--skip-git-repo-check` is not needed in a repo subdirectory, so it is
+omitted. Every option goes *before* the `resume` subcommand; `codex exec
+resume` itself accepts neither `--cd` nor `--sandbox`, but options placed
+before it apply to the resumed session.
 
 | request | argv |
 |---|---|
 | first use | `codex exec ...`; the session id is read from the stream (see parser) and recorded by the engine from `done.sessionId` — extend `done` with an optional `sessionId` field in step 07's types, and have the engine prefer it over its own UUID when present |
-| resume | `codex exec resume <session id> ...` |
-| persona (first use only) | `-c instructions="<text>"` if the installed version supports config overrides for instructions; else prepend the persona to the message under a `# Role` heading |
+| resume | `codex exec --json --cd <cwd> --sandbox ... [-m] [-c ...] resume <session id> -` |
+| persona (first use only) | `-c developer_instructions=<TOML basic string>`. Not `-c instructions=`: on 0.166.0 that *replaces* Codex's base instructions (a hello turn used ~5,000 fewer input tokens), while `developer_instructions` adds a developer message next to them, like Claude's `--append-system-prompt-file`. A persona over 100,000 bytes is prepended to the message under a `# Role` heading instead |
 | model | `-m <model>` |
 | effort | `-c model_reasoning_effort=<mapped>` |
 | tools read | `--sandbox read-only` |
-| tools write | `--sandbox workspace-write --full-auto` |
+| tools write | `--sandbox workspace-write` (no `--full-auto`: 0.166.0 removed it, and `exec` never asks for approval) |
 | skills | nothing: inlined by the engine (step 08). Codex's own discovery reads `.agents/skills/` from the cwd up to the repo root, `~/.agents/skills/` and `/etc/codex/skills/`; there is no per-process flag, and `CODEX_HOME` moves auth and sessions along with skills, so it is not used |
 
-The message is the trailing positional argument of `codex exec`, or
-`-` with the message on stdin if the installed version supports it
-(prefer stdin to avoid ARG_MAX).
+The message goes on stdin, with `-` as the trailing prompt argument
+(0.166.0 supports it; this avoids ARG_MAX).
+
+Usage: `turn.completed` reports the *thread's running totals*, not the
+turn's. A resumed session therefore needs the engine to remember the
+last totals for that session (persisted in run.json so they survive
+reattach) and subtract them before recording `agent.finished` usage.
 
 ## Parser
 

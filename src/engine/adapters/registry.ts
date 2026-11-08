@@ -1,41 +1,16 @@
-import { EFFORT } from '../config/effort.js'
-import { EFFORTS, PROVIDERS, type Provider, TOOLS } from '../config/types.js'
+import { PROVIDERS, type Provider } from '../config/types.js'
 import { RensaError } from '../errors.js'
 import { claudeAdapter } from './claude/index.js'
+import { codexAdapter } from './codex/index.js'
 import { fakeAdapter } from './fake/index.js'
 import { grokAdapter } from './grok/index.js'
 import type { Adapter } from './types.js'
 
 type RealProvider = Exclude<Provider, 'fake'>
 
-/**
- * Stands in for a provider whose adapter is not written yet: never
- * installed, cannot spawn. Step 16 replaces the last one.
- */
-function stubAdapter(provider: RealProvider): Adapter {
-  const notImplemented = () => new RensaError('INTERNAL', `${provider} adapter not implemented`)
-  return {
-    provider,
-    capabilities: () => ({
-      resume: true,
-      model: true,
-      effort: EFFORTS.filter((e) => typeof EFFORT[provider][e] === 'string'),
-      tools: [...TOOLS],
-    }),
-    available: async () => ({ status: 'not_installed' }),
-    spawn: () => {
-      throw notImplemented()
-    },
-    // biome-ignore lint/correctness/useYield: a stub parser fails before reading anything
-    parse: async function* () {
-      throw notImplemented()
-    },
-  }
-}
-
 const REAL: Record<RealProvider, Adapter> = {
   claude: claudeAdapter,
-  codex: stubAdapter('codex'),
+  codex: codexAdapter,
   grok: grokAdapter,
 }
 

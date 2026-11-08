@@ -19,6 +19,15 @@ export interface Capabilities {
   /** rensa effort levels the provider maps to a value of its own. */
   effort: Effort[]
   tools: Tools[]
+  /**
+   * What the usage an agent reports counts. `per_turn` (the default when
+   * absent): this turn only. `session_total`: every turn of the session so
+   * far (Codex), so the engine keeps the last totals of each named
+   * session in run.json and reports a resumed turn's usage as the
+   * difference. Adapters report what their CLI prints either way; parsers
+   * stay pure and know nothing of earlier turns.
+   */
+  usage?: 'per_turn' | 'session_total'
 }
 
 export type Availability =

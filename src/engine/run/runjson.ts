@@ -3,7 +3,7 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import type { InputKind, ResolvedChain } from '../config/types.js'
 import { RensaError } from '../errors.js'
 import { isRecord } from './jsonl.js'
-import type { RunStatus, StepStatus } from './types.js'
+import type { RunStatus, StepStatus, Usage } from './types.js'
 
 /**
  * A run's summary, written once at start and once at the end. `steps` is
@@ -19,6 +19,14 @@ export interface RunJson {
   status?: RunStatus
   /** Named agent → session id. */
   sessions: Record<string, string>
+  /**
+   * Named agent → the usage totals its session last reported, for agents
+   * whose provider reports usage per session (`Capabilities.usage`:
+   * `session_total`). Subtracted from the next resumed turn's totals.
+   * Absent in run.json files written before it existed: their sessions
+   * have no baseline.
+   */
+  session_usage?: Record<string, Usage>
   steps: Record<string, { status?: StepStatus; agents: Record<string, StepStatus | undefined> }>
 }
 

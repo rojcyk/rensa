@@ -1,0 +1,15 @@
+{
+  "provider": "codex",
+  "captured": "2026-11-08",
+  "argv": [
+    "codex",
+    "exec",
+    "--json",
+    "--cd",
+    "/Users/user/Repos/rensa",
+    "--sandbox",
+    "read-only",
+    "-"
+  ],
+  "note": "codex-cli 0.166.0. Prompt: Read the files LICENSE and biome.json, then say in one sentence what each one is for. Prompt path: the message goes to stdin, with `-` as the prompt argument, so it is not bounded by ARG_MAX; the persona is `-c developer_instructions=<TOML string>` on a session's first use (`instructions` would replace Codex's base instructions), prepended to the message under `# Role` when over 100,000 bytes. Session id: Codex assigns it and reports it in `thread.started`; the parser returns it as `done.sessionId`. Usage in `turn.completed` is the session's running total (a resumed session reports every turn so far) and `input_tokens` includes `cached_input_tokens`. No `item.delta` events: an `agent_message` arrives only completed. Errors observed on 0.166.0: without a login (an empty CODEX_HOME) `codex login status` prints `Not logged in` on stderr and exits 1, and `codex exec` retries with `error` lines then ends with `turn.failed` whose message is `unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, ...`, exit 1, classified `auth`; an unknown model is `turn.failed` with `The '<model>' model is not supported when using Codex with a ChatGPT account.`, exit 1, classified `exit`. No usage-limit message has been observed. Redacted after capture: home directory and username, the LICENSE author's name, thread ids replaced with placeholders."
+}
