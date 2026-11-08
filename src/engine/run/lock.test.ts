@@ -251,19 +251,33 @@ try {
       String(offsetMs),
     ])
     live.add(child)
+    /** Lines not yet handed out by `next`. */
     const lines: string[] = []
+    /** Every line the child printed, for the failure message. */
+    const seen: string[] = []
     let stderr = ''
+    /** How the child ended, once it has and its output is all in. */
+    let ended: string | undefined
     let wake = () => {}
     createInterface({ input: child.stdout }).on('line', (line) => {
       lines.push(line)
+      seen.push(line)
       wake()
     })
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString()
     })
+    child.on('error', (err) => {
+      ended = `failed to spawn: ${err.message}`
+      wake()
+    })
+    child.on('exit', () => live.delete(child))
+    // 'exit' can fire while the child's last output is still in the pipes;
+    // 'close' follows once stdout and stderr are drained, so by then every
+    // line the child wrote before dying is in `lines`.
     const exited = new Promise<void>((resolve) => {
-      child.on('exit', () => {
-        live.delete(child)
+      child.on('close', (code, signal) => {
+        ended ??= signal !== null ? `killed by ${signal}` : `exited with code ${code}`
         wake()
         resolve()
       })
@@ -272,8 +286,10 @@ try {
       for (;;) {
         const line = lines.shift()
         if (line !== undefined) return line
-        if (child.exitCode !== null || child.signalCode !== null) {
-          throw new Error(`contender ${name} exited without output: ${stderr}`)
+        if (ended !== undefined) {
+          const output =
+            seen.length === 0 ? 'without output' : `after printing ${JSON.stringify(seen)}`
+          throw new Error(`contender ${name} ${ended} ${output}; stderr: ${JSON.stringify(stderr)}`)
         }
         await new Promise<void>((resolve) => {
           wake = resolve
