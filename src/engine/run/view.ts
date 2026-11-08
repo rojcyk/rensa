@@ -37,6 +37,12 @@ export interface RunProgress {
   /** The running or paused step. */
   currentStep?: string
   pausedAt?: { before?: string; after?: string }
+  /**
+   * A requested pause not yet reached: the step it waits to finish. Set
+   * from the `pause` action while running; gone once the run pauses,
+   * another step starts, the run aborts or it finishes.
+   */
+  pausing?: string
   failedStep?: string
   startedAt?: string
   finishedAt?: string
@@ -136,30 +142,42 @@ export function reduceRun(events: ReadonlyArray<RunEvent>): RunProgress {
         const pausedAt: RunProgress['pausedAt'] = {}
         if (data.before !== undefined) pausedAt.before = data.before
         if (data.after !== undefined) pausedAt.after = data.after
-        progress = { ...progress, status: 'paused', pausedAt }
+        const { pausing: _, ...rest } = progress
+        progress = { ...rest, status: 'paused', pausedAt }
         const step = data.before ?? data.after
         if (step !== undefined) progress.currentStep = step
         break
       }
       case 'step.started': {
         if (event.step === undefined || isTerminal(progress.status)) break
-        const { pausedAt: _, ...rest } = progress
+        const { pausedAt: _, pausing, ...rest } = progress
         progress = {
           ...rest,
           status: progress.status === 'aborting' ? 'aborting' : 'running',
           currentStep: event.step,
         }
+        if (pausing !== undefined && pausing === event.step) progress.pausing = pausing
         break
       }
       case 'user.action': {
-        const data = event.data as { action?: string }
+        const data = event.data as { action?: string; step?: string }
+        if (data.action === 'pause') {
+          if (progress.status !== 'running') break
+          // The step the pause waits for: the one named, else the one running.
+          const step = data.step ?? progress.currentStep
+          if (step !== undefined && step !== progress.pausing) {
+            progress = { ...progress, pausing: step }
+          }
+          break
+        }
         if (data.action !== 'abort' || isTerminal(progress.status)) break
-        progress = { ...progress, status: 'aborting' }
+        const { pausing: _, ...rest } = progress
+        progress = { ...rest, status: 'aborting' }
         break
       }
       case 'run.finished': {
         const data = event.data as { status: RunStatus; failed_step?: string }
-        const { pausedAt: _, ...rest } = progress
+        const { pausedAt: _, pausing: __, ...rest } = progress
         progress = { ...rest, status: data.status, finishedAt: event.t }
         if (data.failed_step !== undefined) progress.failedStep = data.failed_step
         break
@@ -169,6 +187,16 @@ export function reduceRun(events: ReadonlyArray<RunEvent>): RunProgress {
     }
   }
   return progress
+}
+
+/** The base ref the run started from, from `run.started`; undefined before that event. */
+export function runBase(events: ReadonlyArray<RunEvent>): string | undefined {
+  for (const event of events) {
+    if (event.type !== 'run.started') continue
+    const data = event.data as { base?: unknown } | undefined
+    return typeof data?.base === 'string' ? data.base : undefined
+  }
+  return undefined
 }
 
 /**
@@ -187,7 +215,7 @@ export function applyResult(progress: RunProgress, result: RunResult): RunProgre
   ) {
     return progress
   }
-  const { pausedAt: _, failedStep: __, error: ___, ...rest } = progress
+  const { pausedAt: _, pausing: __, failedStep: ___, error: ____, ...rest } = progress
   const next: RunProgress = { ...rest, status: result.status, finishedAt: result.finishedAt }
   if (result.failedStep !== undefined) next.failedStep = result.failedStep
   if (result.error !== undefined) next.error = result.error

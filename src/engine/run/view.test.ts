@@ -332,3 +332,139 @@ describe('merging the run result over the event progress', () => {
     expect(applyResult(once, otherHint).error?.hint).toBe('free some space')
   })
 })
+
+describe('a pending pause in the run progress', () => {
+  const STARTED: NewRunEvent = {
+    type: 'run.started',
+    data: {
+      chain: 'tdd-review',
+      input_kind: 'text',
+      base: 'feat/quote-limits',
+      base_sha: '3f9c2a1b7e4d5c6a8b9f0e1d2c3b4a5968778695',
+      rensa_version: '0.1.0',
+    },
+  }
+  const stepStarted = (step: string): NewRunEvent => ({
+    type: 'step.started',
+    step,
+    data: { kind: 'agent' },
+  })
+  const pauseAction = (step?: string): NewRunEvent => ({
+    type: 'user.action',
+    data: { action: 'pause', ...(step !== undefined && { step }) },
+  })
+
+  /** Stamps the events in order, `seq` from 1. */
+  const run = (...events: NewRunEvent[]): RunEvent[] => events.map((e, i) => stamped(i + 1, e))
+
+  /** Running `implement`, with a pause requested after it. */
+  const PAUSING = [STARTED, stepStarted('implement'), pauseAction('implement')]
+
+  it('names the step the pause action names when a pause is requested while running', () => {
+    expect(
+      reduceRun(run(STARTED, stepStarted('implement'), pauseAction('implement'))),
+    ).toMatchObject({
+      status: 'running',
+      currentStep: 'implement',
+      pausing: 'implement',
+    })
+  })
+
+  it('falls back to the current step when the pause action names no step', () => {
+    expect(reduceRun(run(STARTED, stepStarted('implement'), pauseAction())).pausing).toBe(
+      'implement',
+    )
+  })
+
+  it('is not set when the pause action arrives while the run is already paused', () => {
+    const progress = reduceRun(
+      run(
+        STARTED,
+        { type: 'run.paused', data: { before: 'implement', reason: 'declared' } },
+        pauseAction('implement'),
+      ),
+    )
+
+    expect(progress.status).toBe('paused')
+    expect(progress.pausing).toBeUndefined()
+  })
+
+  it('is cleared when the pause lands with run.paused', () => {
+    const progress = reduceRun(
+      run(...PAUSING, { type: 'run.paused', data: { after: 'implement', reason: 'user' } }),
+    )
+
+    expect(progress).toMatchObject({ status: 'paused', pausedAt: { after: 'implement' } })
+    expect('pausing' in progress).toBe(false)
+  })
+
+  it('is cleared when a different step starts', () => {
+    const progress = reduceRun(run(...PAUSING, stepStarted('test')))
+
+    expect(progress.currentStep).toBe('test')
+    expect('pausing' in progress).toBe(false)
+  })
+
+  it('is kept when the step that starts is the one the pause waits for', () => {
+    expect(
+      reduceRun(
+        run(
+          STARTED,
+          stepStarted('write-tests'),
+          pauseAction('implement'),
+          stepStarted('implement'),
+        ),
+      ).pausing,
+    ).toBe('implement')
+  })
+
+  it('is cleared when the run is aborted', () => {
+    const progress = reduceRun(
+      run(...PAUSING, { type: 'user.action', data: { action: 'abort', step: 'implement' } }),
+    )
+
+    expect(progress.status).toBe('aborting')
+    expect('pausing' in progress).toBe(false)
+  })
+
+  it('is cleared when run.finished arrives', () => {
+    const progress = reduceRun(
+      run(...PAUSING, {
+        type: 'run.finished',
+        data: { status: 'failed', failed_step: 'implement' },
+      }),
+    )
+
+    expect(progress.status).toBe('failed')
+    expect('pausing' in progress).toBe(false)
+  })
+
+  it('is stripped when the run result is applied', () => {
+    const pausing = reduceRun(run(...PAUSING))
+    const result: RunResult = {
+      status: 'failed',
+      finishedAt: '2026-11-02T14:31:00.000Z',
+      error: {
+        code: 'STORAGE',
+        message: "EACCES: permission denied, open '/repo/.rensa/runs/r1/events.jsonl'",
+      },
+    }
+
+    const next = applyResult(pausing, result)
+
+    expect(pausing.pausing).toBe('implement')
+    expect(next.status).toBe('failed')
+    expect('pausing' in next).toBe(false)
+  })
+
+  it.each<[string, NewRunEvent]>([
+    ['a repeated pause action for the same step', pauseAction('implement')],
+    [
+      'a user.note',
+      { type: 'user.note', data: { text: 'Keep the public API unchanged.', applies_from: 'test' } },
+    ],
+    ['a kill action', { type: 'user.action', data: { action: 'kill', step: 'implement' } }],
+  ])('leaves the progress unchanged when %s follows the pause', (_, extra) => {
+    expect(reduceRun(run(...PAUSING, extra))).toEqual(reduceRun(run(...PAUSING)))
+  })
+})

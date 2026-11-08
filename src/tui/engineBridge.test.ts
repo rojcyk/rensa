@@ -24,6 +24,7 @@ import {
   type TranscriptRecord,
 } from '../engine/index.js'
 import { type EngineRepo, engineRepo, finished } from '../testing/engine.js'
+import { type ScriptEvent, scriptedRun } from '../testing/scriptedRun.js'
 import { type ChainStepRef, type RunState, RunView } from './engineBridge.js'
 import { FRAME_MS } from './frameRate.js'
 
@@ -433,6 +434,60 @@ describe('folding a batch of engine events into the store', () => {
     expect(afterAgent.transcriptVersions).toEqual(new Map([['a/tester', 2]]))
     expect(afterSteps.steps.get('b')?.startedAt).toBe('2026-11-06T16:30:05.200Z')
     expect(afterSteps.transcriptVersions).toBe(afterAgent.transcriptVersions)
+    v.dispose()
+  })
+})
+
+describe('the progress reference when a pending pause does not change', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const t = '2026-11-06T16:30:00.000Z'
+  const PAUSING: ScriptEvent[] = [
+    {
+      t,
+      type: 'run.started',
+      data: {
+        chain: 'pair-review',
+        input_kind: 'none',
+        base: 'main',
+        base_sha: '3f9c2a1b7e4d5c6a8b9f0e1d2c3b4a5968778695',
+        rensa_version: 'dev',
+      },
+    },
+    { t, type: 'step.started', step: 'review', data: { kind: 'agent' } },
+    { t, type: 'user.action', data: { action: 'pause', step: 'review' } },
+  ]
+
+  it.each<[string, ScriptEvent]>([
+    [
+      'a repeated pause action',
+      { t, type: 'user.action', data: { action: 'pause', step: 'review' } },
+    ],
+    [
+      'a user.note',
+      { t, type: 'user.note', data: { text: 'also check the README', applies_from: 'wrap-up' } },
+    ],
+    ['a kill action', { t, type: 'user.action', data: { action: 'kill', step: 'review' } }],
+  ])('keeps the same progress reference with pausing set when %s arrives', async (_, extra) => {
+    const run = scriptedRun({
+      id: '20261106-163000-pair-review',
+      dir: '/tmp/rensa-stub-run',
+      history: PAUSING,
+    })
+    const v = new RunView(run.handle, THREE_STEP)
+    const before = v.store.getState().progress
+
+    run.event(extra)
+    await vi.advanceTimersByTimeAsync(FRAME_MS * 2)
+
+    expect(before.pausing).toBe('review')
+    expect(v.store.getState().progress).toBe(before)
     v.dispose()
   })
 })

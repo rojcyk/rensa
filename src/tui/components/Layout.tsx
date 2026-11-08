@@ -102,6 +102,8 @@ export function Layout(props: LayoutProps): ReactNode {
               borderRight={false}
               borderBottom={false}
               borderColor={theme.dim}
+              // `backgroundColor` excludes border cells: in fullscreen the separator takes the root fill (rule D).
+              {...(mode === 'fullscreen' && { borderBackgroundColor: theme.background })}
               // The border is the gutter's first column; content width is
               // rightCols − SPLIT_GUTTER, the budget's transcriptCols.
               paddingLeft={SPLIT_GUTTER - 1}

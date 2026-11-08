@@ -1,12 +1,19 @@
+import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
   applyEvent,
   applyResult,
-  type RingBuffer,
+  openRunDir,
+  type ResolvedChain,
+  RingBuffer,
+  type RunDir,
   type RunEvent,
   type RunHandle,
   type RunProgress,
   type RunResult,
+  readEvents,
+  readRunJson,
+  readTranscript,
   reduceRun,
   reduceSteps,
   type StepView,
@@ -38,6 +45,16 @@ export function transcriptKey(step: string, label: string): string {
   return `${step}/${label}`
 }
 
+/**
+ * What a `RunView` reads a run from: a live `RunHandle`, or a finished
+ * run read back from its directory (`loadRunDir`). Both seed the view
+ * through `attach`, so the two paths share the seeding code.
+ */
+export type RunSource = Pick<RunHandle, 'id' | 'dir' | 'attach' | 'transcript' | 'partial'>
+
+/** Records per transcript kept for a run read from disk; the engine keeps as many for a live one. */
+export const DISK_TRANSCRIPT_CAPACITY = 5000
+
 type Arrival =
   | { kind: 'event'; event: RunEvent }
   | { kind: 'transcript'; key: string }
@@ -61,7 +78,7 @@ export class RunView {
   private result: RunResult | undefined
 
   constructor(
-    private readonly handle: RunHandle,
+    private readonly handle: RunSource,
     chainSteps: ReadonlyArray<ChainStepRef>,
   ) {
     this.batcher = createBatcher<Arrival>((items) => this.flush(items))
@@ -87,6 +104,17 @@ export class RunView {
       steps,
       transcriptVersions: this.seedVersions(steps),
     })
+  }
+
+  /** The run id. */
+  get id(): string {
+    return this.handle.id
+  }
+
+  /** `agents/<step>/<label>` inside the run directory. */
+  agentDir(step: string, label: string): string {
+    const root = this.handle.dir
+    return openRunDir(path.dirname(root), path.basename(root)).agentDir(step, label)
   }
 
   /** The engine-owned buffer for the key. */
@@ -175,6 +203,63 @@ export class RunView {
     }
     return versions
   }
+}
+
+/**
+ * A finished run read back from its directory, as a `RunSource`: the
+ * events from `events.jsonl`, and one `RingBuffer` per transcript the
+ * events mention, filled from its `transcript.jsonl`. Lines that do not
+ * parse are skipped (a crashed writer may leave a partial last line), and
+ * a transcript file that cannot be read is an empty transcript, so a
+ * damaged run still shows. `attach` returns no result: a run that ended
+ * on a storage failure has no `run.finished` on disk and reads as running.
+ */
+export async function loadRunDir(
+  dir: RunDir,
+): Promise<{ source: RunSource; chain: ResolvedChain; warnings: string[] }> {
+  const [runJson, { events, warnings }] = await Promise.all([
+    readRunJson(dir.runJson),
+    readEvents(dir.events),
+  ])
+  const chain = runJson.chain
+  const buffers = new Map<string, RingBuffer<TranscriptRecord>>()
+  const bufferFor = (step: string, label: string) => {
+    const key = transcriptKey(step, label)
+    let buffer = buffers.get(key)
+    if (buffer === undefined) {
+      buffer = new RingBuffer<TranscriptRecord>(DISK_TRANSCRIPT_CAPACITY)
+      buffers.set(key, buffer)
+    }
+    return buffer
+  }
+
+  const keys: { step: string; label: string }[] = []
+  for (const view of reduceSteps(events, chain.steps).values()) {
+    const label =
+      view.agent?.label ??
+      (view.kind === 'shell' && view.startedAt !== undefined ? 'shell' : undefined)
+    if (label !== undefined) keys.push({ step: view.id, label })
+  }
+  await Promise.all(
+    keys.map(async ({ step, label }) => {
+      const buffer = bufferFor(step, label)
+      try {
+        const { records } = await readTranscript(dir.agentFile(step, label, 'transcript.jsonl'))
+        for (const record of records) buffer.push(record)
+      } catch {
+        // No transcript on disk (never written, or removed): an empty one.
+      }
+    }),
+  )
+
+  const source: RunSource = {
+    id: runJson.id,
+    dir: dir.root,
+    attach: () => ({ events, detach: () => {} }),
+    transcript: bufferFor,
+    partial: () => undefined,
+  }
+  return { source, chain, warnings }
 }
 
 function exhaustive(value: never): never {

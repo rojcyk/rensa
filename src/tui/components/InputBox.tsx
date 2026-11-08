@@ -126,6 +126,7 @@ export function InputBox(props: InputBoxProps): ReactNode {
       ref={frameRef}
       width={width}
       height={3}
+      borderColor={focused ? theme.accent : theme.dim}
       {...background}
       {...(borderBackgroundColor !== undefined && { borderBackgroundColor })}
     >

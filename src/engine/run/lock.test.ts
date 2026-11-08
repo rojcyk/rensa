@@ -184,13 +184,17 @@ describe('the recovery mutex', () => {
 // Measured against a lock without the recovery mutex (stale, unlink,
 // link): about one round in five let in a second holder (112 of 600
 // rounds), so 60 rounds miss it with a probability of a few in a million.
+// The winner holds the lock until every other contender has reported, so
+// a second holder in a round can only have overlapped the first. A fixed
+// hold would not do: under machine load a loser's few filesystem calls
+// can take longer than any hold, and it then takes the lock legitimately
+// after the release.
 describe('contenders racing for a stale lock', () => {
   const LOCK_SOURCE = path.join(ROOT, 'src', 'engine', 'run', 'lock.ts')
   const CONTENDERS = 6
   const ROUNDS = 60
   /** Rounds running at the same time, each in its own project directory. */
   const CONCURRENT_ROUNDS = 10
-  const HOLD_MS = 400
   /** Contender i starts this many milliseconds after contender 0. */
   const STAGGER_MS = 1
   /** From the moment every contender is loaded to the shared start. */
@@ -199,29 +203,30 @@ describe('contenders racing for a stale lock', () => {
   const live = new Set<ChildProcess>()
 
   // Loads the module first, reports READY, then reads the shared start
-  // time from stdin, so a slow process start never delays a contender.
+  // time from stdin, so a slow process start never delays a contender. A
+  // winner reports ACQUIRED at once and releases on the next stdin line.
   const CHILD_SCRIPT = `
 import { performance } from 'node:perf_hooks'
 import { createInterface } from 'node:readline'
-const [moduleUrl, projectDir, name, holdMs, offsetMs] = process.argv.slice(2)
+const [moduleUrl, projectDir, name, offsetMs] = process.argv.slice(2)
 const { acquireLock } = await import(moduleUrl)
 const lines = createInterface({ input: process.stdin })
+const input = lines[Symbol.asyncIterator]()
 process.stdout.write('READY\\n')
-const { value: startAt } = await lines[Symbol.asyncIterator]().next()
-lines.close()
+const { value: startAt } = await input.next()
 const target = Number(startAt) + Number(offsetMs)
 const now = () => performance.timeOrigin + performance.now()
 if (target - now() > 3) await new Promise((resolve) => setTimeout(resolve, target - now() - 2))
 while (now() < target) {}
-const late = Math.round(now() - target)
 try {
   const lock = await acquireLock(projectDir, name)
-  await new Promise((resolve) => setTimeout(resolve, Number(holdMs)))
+  process.stdout.write('ACQUIRED\\n')
+  await input.next()
   lock.release()
-  process.stdout.write('ACQUIRED late=' + late + '\\n')
 } catch (err) {
-  process.stdout.write('REFUSED ' + (err && err.code ? err.code : String(err)) + ' late=' + late + '\\n')
+  process.stdout.write('REFUSED ' + (err && err.code ? err.code : String(err)) + '\\n')
 }
+lines.close()
 `
 
   beforeAll(async () => {
@@ -247,10 +252,12 @@ try {
       pathToFileURL(path.join(build.dir, 'lock.mjs')).href,
       projectDir,
       name,
-      String(HOLD_MS),
       String(offsetMs),
     ])
     live.add(child)
+    // Only the start and release lines are written; a write failure means
+    // the child is already gone, which `next` reports from its exit.
+    child.stdin.on('error', () => {})
     /** Lines not yet handed out by `next`. */
     const lines: string[] = []
     /** Every line the child printed, for the failure message. */
@@ -306,7 +313,7 @@ try {
     leftovers: string[]
   }
 
-  async function raceOnce(round: number): Promise<Round & { lateMs: number }> {
+  async function raceOnce(round: number): Promise<Round> {
     const projectDir = path.join(dir.dir, `round-${round}`, '.rensa')
     await mkdir(projectDir, { recursive: true })
     await writeOwner(lockPath(projectDir), staleOwner())
@@ -315,36 +322,27 @@ try {
     )
     for (const c of contenders) expect(await c.next()).toBe('READY')
     const startAt = Date.now() + START_DELAY_MS
-    for (const c of contenders) c.child.stdin.end(`${startAt}\n`)
+    for (const c of contenders) c.child.stdin.write(`${startAt}\n`)
     const outcomes = await Promise.all(contenders.map((c) => c.next()))
+    // Every contender has decided, so the winner may let go.
+    for (const c of contenders) c.child.stdin.end('release\n')
     await Promise.all(contenders.map((c) => c.exited))
-    const results = outcomes.map((line) => /^(ACQUIRED|REFUSED (\S+)) late=(-?\d+)$/.exec(line))
     return {
-      acquired: results.filter((m) => m?.[1] === 'ACQUIRED').length,
-      locked: results.filter((m) => m?.[2] === 'LOCKED').length,
-      other: outcomes.filter((_, i) => {
-        const m = results[i]
-        return m?.[1] !== 'ACQUIRED' && m?.[2] !== 'LOCKED'
-      }),
+      acquired: outcomes.filter((line) => line === 'ACQUIRED').length,
+      locked: outcomes.filter((line) => line === 'REFUSED LOCKED').length,
+      other: outcomes.filter((line) => line !== 'ACQUIRED' && line !== 'REFUSED LOCKED'),
       leftovers: [lockPath(projectDir), recoveryPath(projectDir)].filter((f) => existsSync(f)),
-      lateMs: Math.max(...results.map((m) => Number(m?.[3] ?? Number.NaN))),
     }
   }
 
   it('lets exactly one contender in per round and leaves neither lock nor mutex behind when six processes race for a stale lock', async () => {
-    const rounds: Array<Round & { lateMs: number }> = []
+    const rounds: Round[] = []
     for (let first = 0; first < ROUNDS; first += CONCURRENT_ROUNDS) {
       const batch = Array.from({ length: CONCURRENT_ROUNDS }, (_, k) => raceOnce(first + k))
       rounds.push(...(await Promise.all(batch)))
     }
 
-    // A contender that started more than a hold late would find the lock
-    // already released; the lateness shows that in a failure message.
-    const lateness = `latest start per round, ms: ${rounds.map((r) => r.lateMs).join(' ')}`
-    expect(
-      rounds.map(({ lateMs: _, ...round }) => round),
-      lateness,
-    ).toEqual(
+    expect(rounds).toEqual(
       Array.from({ length: ROUNDS }, () => ({
         acquired: 1,
         locked: CONTENDERS - 1,

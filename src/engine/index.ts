@@ -57,6 +57,7 @@ export {
   type RunResult,
   reduceRun,
   reduceSteps,
+  runBase,
   type StepView,
 } from './run/view.js'
 export { appendSkills, stageSkills } from './template/skills.js'

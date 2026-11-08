@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { constants } from 'node:os'
 import { getAdapter } from '../adapters/registry.js'
 import type { AgentProcess, DoneEvent } from '../adapters/types.js'
-import type { AgentStep, ResolvedChain, ShellStep } from '../config/types.js'
+import type { AgentStep, ResolvedChain, ShellStep, Step } from '../config/types.js'
 import { diag } from '../diag.js'
 import { RensaError } from '../errors.js'
 import { childEnv } from '../process/env.js'
@@ -299,7 +299,7 @@ export class Runner implements RunHandle {
         })
         const outcome =
           step.kind === 'shell'
-            ? await this.runShell(step, kill)
+            ? await this.runShell(step, index, kill)
             : await this.runAgent(step, index, kill)
         this.o.runJson.steps[step.id] = {
           ...this.o.runJson.steps[step.id],
@@ -364,9 +364,10 @@ export class Runner implements RunHandle {
   // Steps
   // -------------------------------------------------------------------------
 
-  private async runShell(step: ShellStep, kill: KillSignal): Promise<StepOutcome> {
+  private async runShell(step: ShellStep, index: number, kill: KillSignal): Promise<StepOutcome> {
     if (this.stopping() || kill.killed) return { status: 'killed' }
     const writer = this.writer(step.id, 'shell')
+    this.recordNotes(step, index, writer)
     try {
       const res = await runShellStep({
         command: step.command,
@@ -456,6 +457,7 @@ export class Runner implements RunHandle {
     if (halted()) return { status: 'killed' }
 
     const writer = this.writer(step.id, label)
+    this.recordNotes(step, index, writer)
     try {
       return await this.spawnAgent(step, kill, writer, session, message, persona)
     } finally {
@@ -669,6 +671,21 @@ export class Runner implements RunHandle {
     this.transcript(step, label).push(record)
     this.partials.delete(transcriptKey(step, label))
     for (const l of [...this.listeners]) call(() => l.transcript?.({ step, label, record }))
+  }
+
+  /**
+   * The notes that apply from this step (`applies_from`), as the first
+   * records of its transcript: once, in this step only. Later steps get
+   * them in their prompt (`appendNotes`) but not in their transcript. A
+   * note sent after the last step started matches no step.
+   */
+  private recordNotes(step: Step, index: number, writer: TranscriptWriter): void {
+    const label = step.kind === 'agent' ? step.agent.label : 'shell'
+    for (const note of this.notes) {
+      if (note.from === index) {
+        this.record(step.id, label, writer, { kind: 'note', text: note.text })
+      }
+    }
   }
 
   private delta(step: string, label: string, text: string): void {

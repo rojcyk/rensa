@@ -1,0 +1,7 @@
+description: Pauses before a shell step.
+steps:
+  - id: one
+    run: echo one
+  - id: check
+    run: echo checked
+    pause: before

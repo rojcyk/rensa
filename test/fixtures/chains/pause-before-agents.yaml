@@ -1,0 +1,11 @@
+description: Pauses before an agent step that another agent step follows.
+steps:
+  - id: one
+    run: echo one
+  - id: two
+    prompt: steps/review.md
+    agents: [{ provider: fake, tools: read }]
+    pause: before
+  - id: three
+    prompt: steps/summarize.md
+    agents: [{ provider: fake, tools: read }]
