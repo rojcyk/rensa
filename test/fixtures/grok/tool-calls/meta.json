@@ -1,0 +1,17 @@
+{
+  "provider": "grok",
+  "captured": "2026-11-08",
+  "argv": [
+    "grok",
+    "--single=Read the files LICENSE and biome.json with the read_file tool, and also try to read the file does-not-exist.txt, then say in one sentence what each existing file is for. Use no other tools.",
+    "--output-format",
+    "streaming-json",
+    "--no-auto-update",
+    "--cwd=/Users/user/Repos/rensa",
+    "-s",
+    "00000000-0000-4000-8000-000000000002",
+    "--tools=read_file,grep,list_dir",
+    "--deny=Bash,Edit,Write,MCPTool"
+  ],
+  "note": "grok 1.0.70 (f50904eaee6c) [stable]. Prompt: Read the files LICENSE and biome.json with the read_file tool, and also try to read the file does-not-exist.txt, then say in one sentence what each existing file is for. Use no other tools. Prompt path: the message goes in argv as `--single=<message>` (the long form of `-p`; a separate value starting with `-` is refused by clap); 1.0.70's headless mode does not read the prompt from stdin, so a prompt over 100,000 bytes is written to `<stagingDir>/message.md` and passed with `--prompt-file`, and a persona over that size is prepended to the message under `# Role` since `--rules` takes text only. Errors observed on 1.0.70: without a login (an empty GROK_HOME) the stream is one line `{\"type\":\"error\",\"message\":\"Not signed in. To authenticate without a browser, run:\\n  grok login --device-code ...\"}`, stderr repeats it after `Error: `, exit 1, classified `auth`; an unknown model and a refused effort level are `error` lines too, classified `exit`. No usage-limit message has been observed. Redacted after capture: home directory and username, the LICENSE author's name (also inside streamed text chunks), session and request ids replaced with placeholders."
+}

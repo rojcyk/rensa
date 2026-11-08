@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type TmpDir, tmpDir } from '../../testing/tmpRepo.js'
 import { RensaError } from '../errors.js'
+import { EFFORT } from './effort.js'
 import { classifyVar, deriveLabels, parseTimeout, resolveChain } from './resolve.js'
 import type {
   Effort,
@@ -87,8 +88,29 @@ beforeEach(() => {
   vi.stubEnv('RENSA_DEV', undefined)
 })
 
+/** Effort entries a test took out of `EFFORT`, put back after it. */
+const removedEfforts: Array<{
+  provider: Provider
+  effort: Effort
+  value: string | null | undefined
+}> = []
+
+/**
+ * Takes `effort` out of `provider`'s row of the effort table for one test,
+ * so the unsupported-level path stays covered while every real provider
+ * maps every level.
+ */
+function withoutEffort(provider: Provider, effort: Effort): void {
+  removedEfforts.push({ provider, effort, value: EFFORT[provider][effort] })
+  EFFORT[provider][effort] = null
+}
+
 afterEach(() => {
   vi.unstubAllEnvs()
+  for (const { provider, effort, value } of removedEfforts.splice(0).reverse()) {
+    if (value === undefined) delete EFFORT[provider][effort]
+    else EFFORT[provider][effort] = value
+  }
 })
 
 describe('agent registry across user, repo and chain levels', () => {
@@ -289,7 +311,9 @@ describe('step agents listed with from', () => {
     expect(err.message).toContain('unknown agent `ghost`')
   })
 
-  it('reports the override effort path when the override asks grok for max', async () => {
+  it('reports the override effort path when the override asks for a level the provider lacks', async () => {
+    // Every real provider maps every level since step 15; take one out.
+    withoutEffort('grok', 'max')
     const chain = chainOf([agentStep({ from: 'grok', effort: 'max' })], {
       agents: { grok: { provider: 'grok', tools: 'read' } },
     })
@@ -385,6 +409,7 @@ describe('registry entry fields', () => {
     ['codex', 'max'],
     ['codex', 'low'],
     ['grok', 'high'],
+    ['grok', 'max'],
   ])('keeps %s effort %s as the canonical level', async (provider, effort) => {
     const chain = chainOf([agentStep('impl')], {
       agents: { impl: { provider, effort, tools: 'read' } },
@@ -395,7 +420,8 @@ describe('registry entry fields', () => {
     expect(agentAt(resolved).effort).toBe(effort)
   })
 
-  it('reports the effort path with the spec message when grok is asked for max', async () => {
+  it('reports the effort path with the spec message when an entry asks for a level the provider lacks', async () => {
+    withoutEffort('grok', 'max')
     const chain = registryChain({ grok: { provider: 'grok', effort: 'max', tools: 'read' } })
 
     const err = await resolveError({ chain })

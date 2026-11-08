@@ -1,0 +1,204 @@
+{"type":"available_commands","tools":["read_file","list_dir","grep","search_tool","use_tool"],"commands":["compact","always-approve","context","plugins","reload-plugins","session-info","feedback","goal","build-feature","create-agent","create-skill","typescript-standards","typescript-tests","built-in-browser","chrome-browser","computer-use","create-content","deep-research","user:docs","google-workspace","import-memory","morning","build-with-ai","code-review","create-workflow","design","execute-plan","game-assets","bundled:imagine","implement","learn","long-running-background-tasks","pr-babysit","resume-claude","resume-codex","resume-cursor","review","skill-design-principles","statusline","threejs-frame-conventions"]}
+{"type":"available_commands","tools":["read_file","list_dir","grep","search_tool","use_tool"],"commands":["compact","always-approve","context","plugins","reload-plugins","session-info","feedback","goal","build-feature","create-agent","create-skill","typescript-standards","typescript-tests","built-in-browser","chrome-browser","computer-use","create-content","deep-research","user:docs","google-workspace","import-memory","morning","build-with-ai","code-review","create-workflow","design","execute-plan","game-assets","bundled:imagine","implement","learn","long-running-background-tasks","pr-babysit","resume-claude","resume-codex","resume-cursor","review","skill-design-principles","statusline","threejs-frame-conventions"]}
+{"type":"text","data":"I'll"}
+{"type":"text","data":" list"}
+{"type":"text","data":" the"}
+{"type":"text","data":" files"}
+{"type":"text","data":" in"}
+{"type":"text","data":" this"}
+{"type":"text","data":" directory"}
+{"type":"text","data":" and"}
+{"type":"text","data":" say"}
+{"type":"text","data":" hello"}
+{"type":"text","data":"."}
+{"type":"available_commands","tools":["read_file","list_dir","grep","search_tool","use_tool"],"commands":["compact","always-approve","context","plugins","reload-plugins","session-info","feedback","goal","build-feature","create-agent","create-skill","typescript-standards","typescript-tests","built-in-browser","chrome-browser","computer-use","create-content","deep-research","user:docs","google-workspace","import-memory","morning","build-with-ai","code-review","create-workflow","design","execute-plan","game-assets","bundled:imagine","implement","learn","long-running-background-tasks","pr-babysit","resume-claude","resume-codex","resume-cursor","review","skill-design-principles","statusline","threejs-frame-conventions"]}
+{"type":"usage","usage":{"input_tokens":7016,"output_tokens":67,"cache_read_input_tokens":2048,"cache_creation_input_tokens":0,"reasoning_tokens":34},"signature":"G5rjsXsTA2lbg4PAqvt+taQV3e84Nu4EOGieRHwXNgW6YRWJ4frr8PXO5wtJUs4oTDejiLCaYrJYKJxypa+GnC0C5r/RJ3+oLVJdzG29WG02hgVXbu9Fv0RW6gjEPLXfNZDaCnnq9J4aPnRzMl3jmRa5LpOKz1Fy2n7XUTwstwGaoocWwAsGfhDpmkbrGmpWCfbg/KguZcGmcsnkyIfURBdX3vDI9VdDwgIbcsY9rwznt7UCa04"}
+{"type":"tool_call","toolCallId":"call-74276fb5-999c-4b61-8bfc-66c03e2ac6c7-0","title":"list_dir","kind":"list","status":"pending","toolName":"list_dir","rawInput":{"target_directory":"/Users/user/Repos/rensa"},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-74276fb5-999c-4b61-8bfc-66c03e2ac6c7-0","status":null,"content":[],"rawOutput":null,"locations":[{"path":"/Users/user/Repos/rensa"}]}
+{"type":"tool_call_update","toolCallId":"call-74276fb5-999c-4b61-8bfc-66c03e2ac6c7-0","status":"completed","content":[],"rawOutput":{"type":"ListDir","Content":{"content":"- /Users/user/Repos/rensa/\n  - biome.json\n  - dist/\n    - app-BoDe8jB_.js\n    - app-BoDe8jB_.js.map\n    - cli/\n      - main.js\n      - main.js.map\n    - engine/\n      - index.d.ts\n      - index.js\n      - index.js.map\n  - docs/\n    - chain.yaml\n    - project.yaml\n  - LICENSE\n  - node_modules/\n    - @alcalzone/\n      - ansi-tokenize/\n        [32 files in subtree: 9 *.js, 9 *.ts, 8 *.map, ...]\n    - @biomejs/\n      - biome/\n        [19 files in subtree: 12 *.md, 4 *no-ext, 3 *.json]\n      - cli-darwin-arm64/\n        - biome\n        - CHANGELOG.md\n        - package.json\n    - @jridgewell/\n      - resolve-uri/\n        [8 files in subtree: 2 *.map, 1 *.js, 1 *.json, ...]\n      - sourcemap-codec/\n        [32 files in subtree: 12 *.map, 5 *.cts, 5 *.mts, ...]\n      - trace-mapping/\n        [52 files in subtree: 20 *.map, 9 *.cts, 9 *.mts, ...]\n    - @oxc-project/\n      - types/\n        [4 files in subtree: 1 *.json, 1 *.md, 1 *no-ext, ...]\n    - @quansync/\n      - fs/\n        [5 files in subtree: 1 *.json, 1 *.md, 1 *.mjs, ...]\n    - @rolldown/\n      - binding-darwin-arm64/\n        [3 files in subtree: 1 *.json, 1 *.md, 1 *.node]\n      - pluginutils/\n        [8 files in subtree: 3 *.mjs, 2 *.mts, 1 *.json, ...]\n    - @types/\n      - chai/\n        [5 files in subtree: 2 *.ts, 1 *.json, 1 *.md, ...]\n      - deep-eql/\n        [4 files in subtree: 1 *.json, 1 *.md, 1 *no-ext, ...]\n      - estree/\n        [5 files in subtree: 2 *.ts, 1 *.json, 1 *.md, ...]\n      - node/\n        [74 files in subtree: 71 *.ts, 1 *.json, 1 *.md, ...]\n      - react/\n        [16 files in subtree: 13 *.ts, 1 *.json, 1 *.md, ...]\n    - @typescript/\n      - typescript-darwin-arm64/\n        [113 files in subtree: 108 *.ts, 2 *no-ext, 1 *.json, ...]\n    - @vitest/\n      - mocker/\n        [31 files in subtree: 16 *.js, 12 *.ts, 1 *.json, ...]\n      - spy/\n        [6 files in subtree: 2 *.ts, 1 *.js, 1 *.json, ...]\n    - @yuku-core/\n      - binding-darwin-arm64/\n        - package.json\n        - yuku-core.node\n    - @yuku-toolchain/\n      - types/\n        [4 files in subtree: 2 *.ts, 1 *.json, 1 *.md]\n    - ansi-escapes/\n      - base.d.ts\n      - base.js\n      - index.d.ts\n      - index.js\n      - license\n      - package.json\n      - readme.md\n    - ansi-regex/\n      - index.d.ts\n      - index.js\n      - license\n      - package.json\n      - readme.md\n    - ansi-styles/\n      - index.d.ts\n      - index.js\n      - license\n      - package.json\n      - readme.md\n    - assertion-error/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - auto-bind/\n      [7 files in subtree: 2 *.js, 2 *.ts, 1 *.json, ...]\n    - cac/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - chai/\n      [7 files in subtree: 4 *.js, 1 *.json, 1 *.md, ...]\n    - chalk/\n      [12 files in subtree: 5 *.js, 4 *.ts, 1 *.json, ...]\n    - cli-boxes/\n      [6 files in subtree: 2 *.json, 1 *.js, 1 *.md, ...]\n    - cli-cursor/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - cli-truncate/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - code-excerpt/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - convert-to-spaces/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - csstype/\n      [5 files in subtree: 1 *.flow, 1 *.json, 1 *.md, ...]\n    - defu/\n      [10 files in subtree: 2 *.cjs, 2 *.cts, 1 *.json, ...]\n    - detect-libc/\n      [8 files in subtree: 4 *.js, 1 *.json, 1 *.md, ...]\n    - dts-resolver/\n      [5 files in subtree: 1 *.json, 1 *.md, 1 *.mjs, ...]\n    - empathic/\n      [23 files in subtree: 5 *.js, 5 *.mjs, 5 *.mts, ...]\n    - environment/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - es-module-lexer/\n      [12 files in subtree: 5 *.js, 2 *.cjs, 2 *.ts, ...]\n    - es-toolkit/\n      [4337 files in subtree: 1098 *.ts, 1090 *.js, 1074 *.mts, ...]\n    - escape-string-regexp/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - estree-walker/\n      [11 files in subtree: 4 *.js, 4 *.ts, 1 *.json, ...]\n    - expect-type/\n      [14 files in subtree: 5 *.js, 5 *.ts, 2 *.md, ...]\n    - fdir/\n      [7 files in subtree: 1 *.cjs, 1 *.cts, 1 *.json, ...]\n    - fsevents/\n      [6 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - get-east-asian-width/\n      [8 files in subtree: 4 *.js, 1 *.json, 1 *.md, ...]\n    - get-tsconfig/\n      [7 files in subtree: 3 *.md, 1 *.json, 1 *.mjs, ...]\n    - hookable/\n      [5 files in subtree: 2 *.md, 1 *.json, 1 *.mjs, ...]\n    - import-without-cache/\n      [5 files in subtree: 1 *.json, 1 *.md, 1 *.mjs, ...]\n    - indent-string/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - ink-testing-library/\n      [6 files in subtree: 1 *.js, 1 *.json, 1 *.map, ...]\n    - ink/\n      [198 files in subtree: 65 *.js, 65 *.map, 65 *.ts, ...]\n    - is-fullwidth-code-point/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - is-in-ci/\n      [6 files in subtree: 2 *.js, 1 *.json, 1 *.md, ...]\n    - lightningcss-darwin-arm64/\n      [4 files in subtree: 1 *.json, 1 *.md, 1 *no-ext, ...]\n    - lightningcss/\n      [14 files in subtree: 4 *.js, 3 *.flow, 3 *.ts, ...]\n    - magic-string/\n      [5 files in subtree: 1 *.json, 1 *.md, 1 *.mjs, ...]\n    - mimic-fn/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - nanoid/\n      [26 files in subtree: 8 *.js, 7 *.cjs, 4 *.json, ...]\n    - node-addon-api/\n      [19 files in subtree: 5 *.js, 3 *.gypi, 3 *.h, ...]\n    - node-pty/\n      [283 files in subtree: 88 *.cc, 52 *.h, 23 *.js, ...]\n    - obug/\n      [11 files in subtree: 4 *.js, 4 *.ts, 1 *.json, ...]\n    - onetime/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - patch-console/\n      [6 files in subtree: 1 *.js, 1 *.json, 1 *.map, ...]\n    - picocolors/\n      [7 files in subtree: 2 *.js, 2 *.ts, 1 *.json, ...]\n    - picomatch/\n      [10 files in subtree: 7 *.js, 1 *.json, 1 *.md, ...]\n    - postcss/\n      [55 files in subtree: 28 *.js, 22 *.ts, 1 *.json, ...]\n    - quansync/\n      [9 files in subtree: 3 *.js, 3 *.ts, 2 *.md, ...]\n    - quick-lru/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - react-reconciler/\n      [13 files in subtree: 10 *.js, 1 *.json, 1 *.md, ...]\n    - react/\n      [27 files in subtree: 24 *.js, 1 *.json, 1 *.md, ...]\n    - resolve-pkg-maps/\n      [7 files in subtree: 1 *.cjs, 1 *.cts, 1 *.json, ...]\n    - restore-cursor/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - rolldown/\n      [54 files in subtree: 31 *.mjs, 17 *.mts, 2 *no-ext, ...]\n    - scheduler/\n      [15 files in subtree: 12 *.js, 1 *.json, 1 *.md, ...]\n    - signal-exit/\n      [5 files in subtree: 2 *.js, 1 *.json, 1 *.md, ...]\n    - slice-ansi/\n      [11 files in subtree: 3 *.js, 2 *.json, 2 *.md, ...]\n    - source-map-js/\n      [18 files in subtree: 11 *.js, 4 *.ts, 1 *.json, ...]\n    - stack-utils/\n      [4 files in subtree: 2 *.md, 1 *.js, 1 *.json]\n    - std-env/\n      [5 files in subtree: 1 *.json, 1 *.md, 1 *.mjs, ...]\n    - string-width/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - strip-ansi/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - tagged-tag/\n      - index.d.ts\n      - license\n      - package.json\n      - readme.md\n    - terminal-size/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - tinybench/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - tinyexec/\n      [5 files in subtree: 1 *.json, 1 *.md, 1 *.mjs, ...]\n    - tinyglobby/\n      [7 files in subtree: 1 *.cjs, 1 *.cts, 1 *.json, ...]\n    - tinyps/\n      [7 files in subtree: 2 *.js, 2 *.ts, 1 *.json, ...]\n    - tsdown/\n      [48 files in subtree: 25 *.mjs, 15 *.mts, 2 *.json, ...]\n    - type-fest/\n      [222 files in subtree: 218 *.ts, 2 *no-ext, 1 *.json, ...]\n    - typescript/\n      [416 files in subtree: 182 *.map, 112 *.js, 112 *.ts, ...]\n    - unconfig-core/\n      [4 files in subtree: 1 *.json, 1 *.mjs, 1 *.mts, ...]\n    - undici-types/\n      [41 files in subtree: 38 *.ts, 1 *.json, 1 *.md, ...]\n    - verkit/\n      [21 files in subtree: 9 *.js, 9 *.ts, 1 *.json, ...]\n    - vite/\n      [37 files in subtree: 18 *.ts, 13 *.js, 3 *.mjs, ...]\n    - vitest/\n      [104 files in subtree: 63 *.js, 33 *.ts, 3 *.cjs, ...]\n    - why-is-node-running/\n      [7 files in subtree: 3 *.js, 1 *.json, 1 *.md, ...]\n    - widest-line/\n      [5 files in subtree: 1 *.js, 1 *.json, 1 *.md, ...]\n    - wrap-ansi/\n      [10 files in subtree: 2 *.js, 2 *.json, 2 *.md, ...]\n    - yaml/\n      [233 files in subtree: 149 *.js, 78 *.ts, 2 *.json, ...]\n    - yoga-layout/\n      [27 files in subtree: 8 *.ts, 5 *.h, 5 *.js, ...]\n    - yuku-ast/\n      [22 files in subtree: 10 *.js, 10 *.ts, 1 *.json, ...]\n    - yuku-codegen/\n      [12 files in subtree: 5 *.js, 5 *.ts, 1 *.json, ...]\n    - yuku-core/\n      [7 files in subtree: 4 *.js, 1 *.json, 1 *.md, ...]\n    - yuku-parser/\n      [5 files in subtree: 2 *.js, 1 *.json, 1 *.md, ...]\n    - zod/\n      [840 files in subtree: 456 *.ts, 124 *.cjs, 124 *.cts, ...]\n  - package-lock.json\n  - package.json\n  - plan/\n    - 01-scaffold.md\n    - 02-config-discovery.md\n    - 03-chain-loading.md\n    - 04-templates-and-vars.md\n    - 05-run-storage.md\n    - 06-processes-and-shell-steps.md\n    - 07-adapter-interface-and-fake.md\n    - 08-engine.md\n    - 09-headless-cli.md\n    - 10-claude-adapter.md\n    - 11-tui-foundation.md\n    - 11b-fullscreen-measurement.md\n    - 12-chains-screen.md\n    - 13-chain-detail-screen.md\n    - 14-run-screen.md\n    - 15-grok-adapter.md\n    - 16-codex-adapter.md\n    - 17-release.md\n    - index.md\n  - README.md\n  - src/\n    - cli/\n      [8 files in subtree: 8 *.ts]\n    - engine/\n      [99 files in subtree: 99 *.ts]\n    - testing/\n      [10 files in subtree: 10 *.ts]\n    - tui/\n      [52 files in subtree: 34 *.tsx, 18 *.ts]\n  - test/\n    - e2e/\n      [4 files in subtree: 4 *.ts]\n    - fixtures/\n      [73 files in subtree: 27 *.yaml, 26 *.md, 10 *.json, ...]\n  - tsconfig.json\n  - tsconfig.test.json\n  - tsdown.config.ts\n  - vitest.config.ts\n  - vitest.e2e.config.ts","absolute_root_path":"/Users/user/Repos/rensa"}},"locations":[]}
+{"type":"thought","data":"Listing the directory"}
+{"type":"thought","data":" files and saying hello."}
+{"type":"text","data":"Hello"}
+{"type":"text","data":".\n\n"}
+{"type":"text","data":"Here"}
+{"type":"text","data":" is"}
+{"type":"text","data":" what"}
+{"type":"text","data":" is"}
+{"type":"text","data":" in"}
+{"type":"text","data":" `/"}
+{"type":"text","data":"Users"}
+{"type":"text","data":"/"}
+{"type":"text","data":"us"}
+{"type":"text","data":"er"}
+{"type":"text","data":"/"}
+{"type":"text","data":"Repos"}
+{"type":"text","data":"/"}
+{"type":"text","data":"r"}
+{"type":"text","data":"ensa"}
+{"type":"text","data":"`:"}
+{"type":"text","data":"\n\n"}
+{"type":"text","data":"**"}
+{"type":"text","data":"Files"}
+{"type":"text","data":"**"}
+{"type":"text","data":"\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"biome"}
+{"type":"text","data":".json"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"LICENSE"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"package"}
+{"type":"text","data":".json"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"package"}
+{"type":"text","data":"-"}
+{"type":"text","data":"lock"}
+{"type":"text","data":".json"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"README"}
+{"type":"text","data":".md"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"ts"}
+{"type":"text","data":"config"}
+{"type":"text","data":".json"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"ts"}
+{"type":"text","data":"config"}
+{"type":"text","data":".test"}
+{"type":"text","data":".json"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"ts"}
+{"type":"text","data":"down"}
+{"type":"text","data":".config"}
+{"type":"text","data":".ts"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"vit"}
+{"type":"text","data":"est"}
+{"type":"text","data":".config"}
+{"type":"text","data":".ts"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"vit"}
+{"type":"text","data":"est"}
+{"type":"text","data":"."}
+{"type":"text","data":"e"}
+{"type":"text","data":"2"}
+{"type":"text","data":"e"}
+{"type":"text","data":".config"}
+{"type":"text","data":".ts"}
+{"type":"text","data":"`\n\n"}
+{"type":"text","data":"**"}
+{"type":"text","data":"Directories"}
+{"type":"text","data":"**"}
+{"type":"text","data":"\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"dist"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" —"}
+{"type":"text","data":" built"}
+{"type":"text","data":" CLI"}
+{"type":"text","data":" and"}
+{"type":"text","data":" engine"}
+{"type":"text","data":" output"}
+{"type":"text","data":"\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"docs"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" —"}
+{"type":"text","data":" `"}
+{"type":"text","data":"chain"}
+{"type":"text","data":".yaml"}
+{"type":"text","data":"`,"}
+{"type":"text","data":" `"}
+{"type":"text","data":"project"}
+{"type":"text","data":".yaml"}
+{"type":"text","data":"`\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"node"}
+{"type":"text","data":"_"}
+{"type":"text","data":"modules"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" —"}
+{"type":"text","data":" dependencies"}
+{"type":"text","data":"\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"plan"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" —"}
+{"type":"text","data":" numbered"}
+{"type":"text","data":" design"}
+{"type":"text","data":" notes"}
+{"type":"text","data":" (`"}
+{"type":"text","data":"01"}
+{"type":"text","data":"`"}
+{"type":"text","data":" through"}
+{"type":"text","data":" `"}
+{"type":"text","data":"17"}
+{"type":"text","data":"`,"}
+{"type":"text","data":" plus"}
+{"type":"text","data":" `"}
+{"type":"text","data":"index"}
+{"type":"text","data":".md"}
+{"type":"text","data":"`)"}
+{"type":"text","data":"\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"src"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" —"}
+{"type":"text","data":" `"}
+{"type":"text","data":"cli"}
+{"type":"text","data":"/"}
+{"type":"text","data":"`,"}
+{"type":"text","data":" `"}
+{"type":"text","data":"engine"}
+{"type":"text","data":"/"}
+{"type":"text","data":"`,"}
+{"type":"text","data":" `"}
+{"type":"text","data":"testing"}
+{"type":"text","data":"/"}
+{"type":"text","data":"`,"}
+{"type":"text","data":" `"}
+{"type":"text","data":"t"}
+{"type":"text","data":"ui"}
+{"type":"text","data":"/`"}
+{"type":"text","data":"\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"test"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" —"}
+{"type":"text","data":" `"}
+{"type":"text","data":"e"}
+{"type":"text","data":"2"}
+{"type":"text","data":"e"}
+{"type":"text","data":"/`"}
+{"type":"text","data":" and"}
+{"type":"text","data":" `"}
+{"type":"text","data":"fixtures"}
+{"type":"text","data":"/`"}
+{"type":"available_commands","tools":["read_file","list_dir","grep","search_tool","use_tool"],"commands":["compact","always-approve","context","plugins","reload-plugins","session-info","feedback","goal","build-feature","create-agent","create-skill","typescript-standards","typescript-tests","built-in-browser","chrome-browser","computer-use","create-content","deep-research","user:docs","google-workspace","import-memory","morning","build-with-ai","code-review","create-workflow","design","execute-plan","game-assets","bundled:imagine","implement","learn","long-running-background-tasks","pr-babysit","resume-claude","resume-codex","resume-cursor","review","skill-design-principles","statusline","threejs-frame-conventions"]}
+{"type":"usage","usage":{"input_tokens":3971,"output_tokens":236,"cache_read_input_tokens":8960,"cache_creation_input_tokens":0,"reasoning_tokens":55},"signature":"4A7UPPqjAln1JHAwjiXMbYOQU17VbY1KS0i9Wi5JszPjERsIB3sfjoeTVb/zYCv1qNowk2kXt3PQpcNb+hFoQdL1QTGLr/aRcwoixvTtQ1NVtym66DI//uYE06X4dbGBgYZUA+VsEsj5Zbz8UYdlo65PpuiXTLNvroFbkNb+DL8aJ0NhIindQwOQJwnstOdZXWXtWOeA/YccM47td/TfjpxHUqQVeXdBKkk0YbVHadFaDDt7578l0R9XV8yWoicPKGY"}
+{"type":"end","stopReason":"end_turn","sessionId":"00000000-0000-4000-8000-000000000001","requestId":"00000000-0000-4000-9000-000000000001","cwd":"/Users/user/Repos/rensa","usage":{"input_tokens":10987,"cache_read_input_tokens":11008,"cache_creation_input_tokens":0,"output_tokens":303,"reasoning_tokens":89,"total_tokens":22298},"num_turns":2,"total_cost_usd":0.029296,"total_cost_usd_ticks":292960000,"modelUsage":{"grok-4.7-build":{"inputTokens":10987,"outputTokens":303,"cacheReadInputTokens":11008,"cacheCreationInputTokens":0,"modelCalls":2,"costUSD":0.029296}}}

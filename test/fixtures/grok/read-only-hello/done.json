@@ -1,0 +1,9 @@
+{
+  "exitCode": null,
+  "usage": {
+    "input": 10987,
+    "output": 303,
+    "cache_read": 11008,
+    "context": 12931
+  }
+}

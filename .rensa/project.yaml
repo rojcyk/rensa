@@ -5,3 +5,7 @@ agents:
     model: opus
     tools: read
     prompt: agents/reviewer.md
+  grok:
+    provider: grok
+    tools: read
+    prompt: agents/reviewer.md

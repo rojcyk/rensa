@@ -8,6 +8,8 @@ import type { Effort, Provider } from './types.js'
 export const EFFORT: Record<Provider, Partial<Record<Effort, string | null>>> = {
   claude: { low: 'low', medium: 'medium', high: 'high', max: 'max' },
   codex: { low: 'low', medium: 'medium', high: 'high', max: 'xhigh' },
-  grok: { low: 'low', medium: 'medium', high: 'high', max: null }, // adjust in step 15 once verified
+  // Grok 1.0.70: the models' effort menus offer low, medium, high, xhigh; the
+  // CLI's own `max` is refused by every installed model, so `max` is `xhigh`.
+  grok: { low: 'low', medium: 'medium', high: 'high', max: 'xhigh' },
   fake: { low: 'low', medium: 'medium', high: 'high', max: 'max' },
 }

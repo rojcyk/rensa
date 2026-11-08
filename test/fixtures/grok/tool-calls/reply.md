@@ -1,0 +1,1 @@
+`LICENSE` is the MIT license for this project (copyright Example Author, 2026), and `biome.json` configures Biome’s formatter and linter, including import boundaries that keep the engine separate from the TUI and CLI. `does-not-exist.txt` is not in the repo.

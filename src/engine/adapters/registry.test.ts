@@ -3,6 +3,7 @@ import type { Provider } from '../config/types.js'
 import { RensaError } from '../errors.js'
 import { claudeAdapter } from './claude/index.js'
 import { fakeAdapter } from './fake/index.js'
+import { grokAdapter } from './grok/index.js'
 import { allAdapters, getAdapter } from './registry.js'
 import type { SpawnRequest } from './types.js'
 
@@ -11,8 +12,8 @@ afterEach(() => {
 })
 
 const REAL: Provider[] = ['claude', 'codex', 'grok']
-/** Providers whose adapter is still a stub; claude became real in step 10. */
-const STUBS: Provider[] = ['codex', 'grok']
+/** Providers whose adapter is still a stub; claude became real in step 10, grok in step 15. */
+const STUBS: Provider[] = ['codex']
 
 const request: SpawnRequest = {
   cwd: '/Users/alice/code/shop',
@@ -64,6 +65,10 @@ describe('looking up an adapter by provider', () => {
 
   it('returns the real claude adapter rather than a stub when claude is looked up', () => {
     expect(getAdapter('claude')).toBe(claudeAdapter)
+  })
+
+  it('returns the real grok adapter rather than a stub when grok is looked up', () => {
+    expect(getAdapter('grok')).toBe(grokAdapter)
   })
 
   it('returns the fake adapter when RENSA_DEV=1', () => {
@@ -120,11 +125,26 @@ describe('stub adapters for providers not yet implemented', () => {
     )
   })
 
-  it('offers grok no max effort because the effort table maps none', () => {
-    expect(getAdapter('grok').capabilities().effort).toEqual(['low', 'medium', 'high'])
-  })
-
   it('offers codex every effort level because the effort table maps each one', () => {
     expect(getAdapter('codex').capabilities().effort).toEqual(['low', 'medium', 'high', 'max'])
+  })
+})
+
+describe('the grok adapter as registered', () => {
+  it('offers every effort level including max when grok is looked up, since max maps to xhigh', () => {
+    expect(getAdapter('grok').capabilities()).toEqual({
+      resume: true,
+      model: true,
+      effort: ['low', 'medium', 'high', 'max'],
+      tools: ['read', 'write'],
+    })
+  })
+
+  it('reports grok as not installed when no PATH directory holds grok', async () => {
+    await expect(getAdapter('grok').available({ PATH: '/nonexistent/rensa-bin' })).resolves.toEqual(
+      {
+        status: 'not_installed',
+      },
+    )
   })
 })
