@@ -25,7 +25,14 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:e2e"
   },
-  "repository": "github:rojcyk/rensa",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rojcyk/rensa.git"
+  },
+  "homepage": "https://github.com/rojcyk/rensa#readme",
+  "bugs": {
+    "url": "https://github.com/rojcyk/rensa/issues"
+  },
   "publishConfig": {
     "access": "public"
   },

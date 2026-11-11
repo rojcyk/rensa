@@ -1,6 +1,7 @@
 import { cp, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readmeRensaFiles } from '../../testing/markdown.js'
 import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../testing/tmpRepo.js'
 import { RensaError } from '../errors.js'
 import { discover } from './discover.js'
@@ -96,6 +97,52 @@ describe('loading the documented example chain', () => {
     expect(chain.sources).toStrictEqual({
       chain: path.join(projectDir, 'tdd-review.yaml'),
       project: path.join(projectDir, 'project.yaml'),
+    })
+  })
+})
+
+describe("loading the README's minimal chain", () => {
+  it('finds exactly the three files the 60-second start tells a user to create', async () => {
+    const files = await readmeRensaFiles()
+
+    expect([...files.keys()]).toEqual([
+      '.rensa/review.yaml',
+      '.rensa/agents/reviewer.md',
+      '.rensa/steps/review.md',
+    ])
+  })
+
+  it('resolves the README chain and prompts into one read-only claude review step with no warnings', async () => {
+    for (const [file, body] of await readmeRensaFiles()) {
+      await mkdir(path.dirname(path.join(repo.dir, file)), { recursive: true })
+      await writeFile(path.join(repo.dir, file), body)
+    }
+
+    const chain = await loadChain('review', await discover(repo.dir))
+
+    const review: Step = {
+      id: 'review',
+      kind: 'agent',
+      prompt: path.join(projectDir, 'steps/review.md'),
+      agent: {
+        provider: 'claude',
+        tools: 'read',
+        prompt: path.join(projectDir, 'agents/reviewer.md'),
+        skills: [],
+        label: 'reviewer',
+        name: 'reviewer',
+        session: 'named',
+      },
+      vars: { diff: { kind: 'shell', value: 'git diff {{base}}' } },
+      onFail: 'stop',
+      timeoutMs: expect.any(Number),
+    }
+    expect(chain.steps).toStrictEqual([review])
+    expect(chain).toMatchObject({
+      name: 'review',
+      description: 'Review the current diff.',
+      writes: false,
+      warnings: [],
     })
   })
 })
