@@ -119,14 +119,37 @@ If nothing is marked **Fix**, go to Phase 5.
 
 **Exit when:** every **Fix** finding is fixed or rejected with a reason you accept.
 
-Send the **Fix** findings to the implementer from Phase 1 with `SendMessage`, **one finding per message**, most impactful first. Wait for each reply before sending the next. Each message contains the finding's id, location, description, evidence, and recommendation, plus your own note if you verified something the reviewer missed.
+### Group connected findings
 
-After each reply:
+Before sending anything, sort the **Fix** findings into fix sets. Two findings belong in the same set when fixing one properly changes how the other should be fixed:
 
-- `fixed` -- read the diff at the cited location and confirm it resolves the finding. If it does not, say what is still wrong and send it back once.
+| Findings are connected when | Example |
+|---|---|
+| They share a root cause | Three call sites mishandle the same malformed event because the parser accepts it |
+| They touch the same function, type, or module boundary | A wrong return type and a missing error branch in the same adapter method |
+| One fix constrains the other | Adding a cancellation path changes where a resource must be released |
+| The recommendation for one would undo or conflict with the fix for the other | Reviewer A wants the retry moved into the adapter, reviewer B wants the adapter to stay retry-free |
+
+Findings that merely sit in the same file, or that were raised by the same reviewer, are not connected. A finding with no connections is a set of one, and most sets will be.
+
+The point of a set is design. An implementer that sees one finding at a time patches it locally, and the next finding then forces a second patch on top of the first. Seeing the set together lets it fix the root cause once.
+
+### Send the sets
+
+Send each set to the implementer from Phase 1 with `SendMessage`, **one set per message**, most impactful set first. Wait for the reply before sending the next. Each message contains:
+
+- every finding in the set: id, location, description, evidence, and recommendation
+- for a set of more than one, one or two sentences on why they are connected, and the instruction to design one fix that resolves all of them rather than patching each in turn
+- your own note if you verified something the reviewer missed
+
+The implementer reports an outcome per finding. After each reply, for every finding in the set:
+
+- `fixed` -- read the diff at the cited location and confirm it resolves the finding. If it does not, say what is still wrong and send that finding back once.
 - `rejected` -- read the implementer's reason. Accept it and record why, or answer its objection and send the finding back once. After a second rejection, move the finding to **Hold for the user**.
 
-If the original implementer cannot be reached, dispatch a new `implementer` with the task statement and the finding, and note that it is a fresh agent.
+If the implementer rejects part of a set, check whether the fixes it did make still hold without the rejected part. If they do not, send the whole set back once with your answer to the objection.
+
+If the original implementer cannot be reached, dispatch a new `implementer` with the task statement and the set, and note that it is a fresh agent.
 
 There is no second review round. Fixes are checked by you, then exercised by the tests.
 
@@ -139,7 +162,7 @@ Dispatch one `test-writer` agent with the task statement and the ignore list. Ke
 When it returns:
 
 1. If `suspected_bugs` is empty and the test run is clean, go to Phase 6.
-2. Otherwise triage each suspected bug with the Phase 3 table, send the **Fix** ones to the implementer as in Phase 4, then message the same test-writer to rerun the affected tests.
+2. Otherwise triage each suspected bug with the Phase 3 table, group the **Fix** ones into sets and send them to the implementer as in Phase 4, then message the same test-writer to rerun the affected tests. A suspected bug in code the implementer changed in Phase 4 goes with a note naming that earlier fix, so the implementer revisits its design rather than patching over it.
 3. Repeat at most three rounds. If bugs remain after the third, stop looping and report them as open.
 
 Never ask the test-writer to weaken or delete a failing test so the run goes green. A failing test with a confirmed bug behind it is a finding, and it goes to the implementer.
