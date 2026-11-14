@@ -80,7 +80,6 @@ export function promptText(req: SpawnRequest): string {
   return `# Role\n\n${req.persona}\n\n# Task\n\n${req.message}`
 }
 
-/** Whether `text` is small enough to pass as one argv string. */
 export function fitsArgv(text: string): boolean {
   return Buffer.byteLength(text, 'utf8') <= ARGV_TEXT_LIMIT_BYTES
 }

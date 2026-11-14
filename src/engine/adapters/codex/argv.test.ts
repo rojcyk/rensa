@@ -36,7 +36,6 @@ function configValues(argv: readonly string[], key: string): string[] {
   return valuesOf(argv, '-c').flatMap((v) => (v.startsWith(prefix) ? [v.slice(prefix.length)] : []))
 }
 
-/** Text of exactly `bytes` UTF-8 bytes. */
 function textOfBytes(bytes: number): string {
   return 'r'.repeat(bytes)
 }

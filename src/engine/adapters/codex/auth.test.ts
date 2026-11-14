@@ -7,13 +7,14 @@ import { type TmpDir, tmpDir } from '../../../testing/tmpRepo.js'
 import { drainDiag } from '../../diag.js'
 import { checkProviders } from '../available.js'
 import type { Availability, AvailabilityOptions } from '../types.js'
-import { codexAvailability, parseLoginStatus, parseVersion } from './auth.js'
+import { codexAvailability, parseLoginStatus } from './auth.js'
 import { codexAdapter } from './index.js'
 
 // `codex --version` and `codex login status` as observed on codex-cli
 // 0.166.0: the version on stdout; the login state on stderr, exit 0 when
 // logged in and 1 when not.
-const VERSION = 'codex-cli 0.166.0'
+const VERSION_OUTPUT = 'codex-cli 0.166.0'
+const VERSION = '0.166.0'
 const LOGGED_IN = 'Logged in using ChatGPT'
 const NOT_LOGGED_IN = 'Not logged in'
 
@@ -42,7 +43,7 @@ afterEach(async () => {
  */
 async function installCodex(
   loginStatus: string,
-  version = `echo '${VERSION}'\nexit 0`,
+  version = `echo '${VERSION_OUTPUT}'\nexit 0`,
 ): Promise<NodeJS.ProcessEnv> {
   const bin = path.join(tmp.dir, 'bin')
   await mkdir(bin, { recursive: true })
@@ -182,21 +183,5 @@ describe('reading codex login status output', () => {
 
   it('returns false when the exit code is 1 and the output is empty', () => {
     expect(parseLoginStatus('', 1)).toBe(false)
-  })
-})
-
-describe('reading codex --version output', () => {
-  it('returns the first line trimmed when the output has surrounding space and more lines', () => {
-    expect(parseVersion(`  ${VERSION}  \nA new version of Codex is available: 0.167.0\n`)).toBe(
-      VERSION,
-    )
-  })
-
-  it('returns the observed version line when given it alone', () => {
-    expect(parseVersion(`${VERSION}\n`)).toBe(VERSION)
-  })
-
-  it('returns undefined when the output is empty', () => {
-    expect(parseVersion('')).toBe(undefined)
   })
 })

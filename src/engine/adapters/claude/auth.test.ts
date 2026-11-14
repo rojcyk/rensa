@@ -7,7 +7,7 @@ import { type TmpDir, tmpDir } from '../../../testing/tmpRepo.js'
 import { drainDiag } from '../../diag.js'
 import { checkProviders } from '../available.js'
 import type { Availability, AvailabilityOptions } from '../types.js'
-import { claudeAvailability, parseAuthStatus, parseVersion } from './auth.js'
+import { claudeAvailability, parseAuthStatus } from './auth.js'
 import { claudeAdapter } from './index.js'
 
 // `claude auth status` as observed on Claude Code 2.1.319: pretty-printed
@@ -34,7 +34,8 @@ const LOGGED_OUT_STATUS = `{
   "apiProvider": "firstParty",
   "loginExpiresAt": null
 }`
-const VERSION = '2.1.319 (Claude Code)'
+const VERSION_OUTPUT = '2.1.319 (Claude Code)'
+const VERSION = '2.1.319'
 
 // Tests that check how probe output is read get a deadline no loaded
 // machine misses: under a full parallel suite the fake CLIs below have
@@ -56,16 +57,19 @@ afterEach(async () => {
 })
 
 /**
- * Puts a `claude` shell script on a PATH of its own: `--version` prints
- * the 2.1.319 version line, `auth status` runs `authStatus`.
+ * Puts a `claude` shell script on a PATH of its own: `--version` runs
+ * `version` (by default printing the 2.1.319 version line), `auth status`
+ * runs `authStatus`.
  */
-async function installClaude(authStatus: string): Promise<NodeJS.ProcessEnv> {
+async function installClaude(
+  authStatus: string,
+  version = `echo '${VERSION_OUTPUT}'\nexit 0`,
+): Promise<NodeJS.ProcessEnv> {
   const file = path.join(tmp.dir, 'claude')
   const script = [
     '#!/bin/sh',
     'if [ "$1" = "--version" ]; then',
-    `  echo '${VERSION}'`,
-    '  exit 0',
+    version,
     'fi',
     'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
     authStatus,
@@ -141,6 +145,29 @@ describe('availability from the observed claude auth status output', SLOW_PROBE,
 
     await expect(claudeAvailability(env, READ_OUTPUT)).resolves.toMatchObject({
       status: 'not_logged_in',
+    })
+  })
+})
+
+describe('availability when claude --version cannot run to completion', SLOW_PROBE, () => {
+  it('reports the version as unknown and records why in diag when --version dies from a signal', async () => {
+    const env = await installClaude(`${print(LOGGED_IN_STATUS)}\nexit 0`, 'kill -KILL $$')
+
+    const availability = await claudeAvailability(env, READ_OUTPUT)
+
+    expect(availability).toEqual({ status: 'ready', version: 'unknown' })
+    expect(drainDiag().map((e) => e.message)).toEqual([
+      'claude --version failed: killed by SIGKILL',
+    ])
+  })
+
+  it('keeps the login hint with an unknown version when --version fails and auth status says logged out', async () => {
+    const env = await installClaude(`${print(LOGGED_OUT_STATUS)}\nexit 1`, 'kill -KILL $$')
+
+    await expect(claudeAvailability(env, READ_OUTPUT)).resolves.toEqual({
+      status: 'not_logged_in',
+      version: 'unknown',
+      hint: 'run: claude auth login',
     })
   })
 })
@@ -222,15 +249,5 @@ describe('reading claude auth status output', () => {
     ['empty output', ''],
   ])('falls back to the exit code when the output is %s', (_, stdout) => {
     expect([parseAuthStatus(stdout, 0), parseAuthStatus(stdout, 1)]).toEqual([true, false])
-  })
-})
-
-describe('reading claude --version output', () => {
-  it('returns the first line trimmed when the output has surrounding space and more lines', () => {
-    expect(parseVersion(`  ${VERSION}  \nUpdate available: 2.1.320\n`)).toBe(VERSION)
-  })
-
-  it('returns the observed version line when given it alone', () => {
-    expect(parseVersion(`${VERSION}\n`)).toBe(VERSION)
   })
 })

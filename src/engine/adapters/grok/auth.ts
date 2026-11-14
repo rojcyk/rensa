@@ -5,6 +5,7 @@ import { diag } from '../../diag.js'
 import { spawnProcess } from '../../process/spawn.js'
 import { findOnPath } from '../path.js'
 import type { Availability, AvailabilityOptions } from '../types.js'
+import { parseVersion } from '../version.js'
 
 const SCOPE = 'grok.auth'
 // `checkProviders` counts its 3 s from before `available()` is called and
@@ -54,12 +55,6 @@ async function hasCredentials(env: NodeJS.ProcessEnv): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/** The first line of `grok --version`, trimmed, e.g. `grok 1.0.70 (f50904eaee6c) [stable]`. */
-export function parseVersion(stdout: string): string | undefined {
-  const first = stdout.split('\n', 1)[0]?.trim()
-  return first === undefined || first === '' ? undefined : first
 }
 
 /** `grok --version`, or `unknown` when it cannot run to completion; the reason goes to `diag`. */

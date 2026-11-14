@@ -415,8 +415,6 @@ function promptRow(lines: string[]): number {
   return lines.findIndex((l) => l.startsWith('│ ›'))
 }
 
-// --- tests -----------------------------------------------------------------
-
 describe('the frame of a chain with a text input', () => {
   it('matches the plan mock when the tdd-review chain is shown on a clean tree', async () => {
     const s = await mounted({ engine: new StubEngine(root, [TDD_REVIEW]), chain: 'tdd-review' })

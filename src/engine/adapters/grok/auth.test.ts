@@ -7,11 +7,12 @@ import { type TmpDir, tmpDir } from '../../../testing/tmpRepo.js'
 import { drainDiag } from '../../diag.js'
 import { checkProviders } from '../available.js'
 import type { Availability, AvailabilityOptions } from '../types.js'
-import { authFile, grokAvailability, parseVersion } from './auth.js'
+import { authFile, grokAvailability } from './auth.js'
 import { grokAdapter } from './index.js'
 
 // `grok --version` as observed on Grok Build 1.0.70.
-const VERSION = 'grok 1.0.70 (f50904eaee6c) [stable]'
+const VERSION_OUTPUT = 'grok 1.0.70 (f50904eaee6c) [stable]'
+const VERSION = '1.0.70'
 
 // Tests that check how probe output is read get a deadline no loaded
 // machine misses: under a full parallel suite the fake CLIs below have
@@ -35,7 +36,7 @@ afterEach(async () => {
  * Puts a `grok` shell script on a PATH of its own; `--version` runs
  * `version` (by default it prints the 1.0.70 version line).
  */
-async function installGrok(version = `echo '${VERSION}'\nexit 0`): Promise<string> {
+async function installGrok(version = `echo '${VERSION_OUTPUT}'\nexit 0`): Promise<string> {
   const bin = path.join(tmp.dir, 'bin')
   await mkdir(bin, { recursive: true })
   const file = path.join(bin, 'grok')
@@ -168,15 +169,5 @@ describe('availability when grok --version cannot run to completion', SLOW_PROBE
     } finally {
       await killProcessesWithArgs(`sleep ${sleep}`)
     }
-  })
-})
-
-describe('reading grok --version output', () => {
-  it('returns the first line trimmed when the output has surrounding space and more lines', () => {
-    expect(parseVersion(`  ${VERSION}  \nA newer version is available: 1.0.71\n`)).toBe(VERSION)
-  })
-
-  it('returns undefined when the output is empty', () => {
-    expect(parseVersion('')).toBe(undefined)
   })
 })

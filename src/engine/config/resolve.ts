@@ -123,10 +123,6 @@ export function classifyVar(value: string): VarSpec {
   return { kind: 'literal', value }
 }
 
-// ---------------------------------------------------------------------------
-// Agents
-// ---------------------------------------------------------------------------
-
 type AgentField = keyof RawAgent
 
 /**
@@ -254,10 +250,6 @@ function lookup(registry: Registry, name: string, loc: Loc): AgentDraft {
   return entry
 }
 
-// ---------------------------------------------------------------------------
-// Steps
-// ---------------------------------------------------------------------------
-
 const STEP_ID = /^[a-z0-9_-]+$/i
 const VAR_NAME = /^[a-z_][\w-]*$/i
 
@@ -366,10 +358,6 @@ function timeoutMs(value: string | undefined, loc: Loc): number {
   }
   return ms
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function oneOf<const T extends string>(value: string, allowed: readonly T[], loc: Loc): T {
   const match = allowed.find((a) => a === value)

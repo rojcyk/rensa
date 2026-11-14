@@ -3,6 +3,7 @@ import { spawnProcess } from '../../process/spawn.js'
 import { isRecord } from '../../run/jsonl.js'
 import { findOnPath } from '../path.js'
 import type { Availability, AvailabilityOptions } from '../types.js'
+import { parseVersion } from '../version.js'
 
 const SCOPE = 'claude.auth'
 // `checkProviders` counts its 3 s from before `available()` is called,
@@ -62,12 +63,6 @@ async function readLoggedIn(
     return true
   }
   return parseAuthStatus(out.stdout, out.exitCode)
-}
-
-/** The first line of `claude --version`, trimmed, e.g. `2.1.319 (Claude Code)`. */
-export function parseVersion(stdout: string): string | undefined {
-  const first = stdout.split('\n', 1)[0]?.trim()
-  return first === undefined || first === '' ? undefined : first
 }
 
 /**

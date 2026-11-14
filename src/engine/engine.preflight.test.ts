@@ -47,7 +47,6 @@ async function addChain(projectDir: string, name: string, yaml: string): Promise
   await writeFile(path.join(projectDir, `${name}.yaml`), yaml)
 }
 
-/** A shell step, then a write agent that pauses before it runs. */
 const WRITE_PAUSE_BEFORE = `description: A shell step, then a write agent that pauses first.
 steps:
   - id: baseline
@@ -58,7 +57,6 @@ steps:
     pause: before
 `
 
-/** A write agent from the registry, narrowed to read by its step. */
 const NARROWED_TO_READ = `description: A write agent narrowed to read for its only step.
 agents:
   impl:
@@ -71,7 +69,6 @@ steps:
     tools: read
 `
 
-/** The same write agent from the registry, used as is. */
 const REGISTRY_WRITE = `description: A write agent from the registry, not narrowed.
 agents:
   impl:

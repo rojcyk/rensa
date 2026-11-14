@@ -39,7 +39,6 @@ function joinedValuesOf(argv: readonly string[], flag: string): string[] {
   return argv.flatMap((arg) => (arg.startsWith(prefix) ? [arg.slice(prefix.length)] : []))
 }
 
-/** Text of exactly `bytes` UTF-8 bytes. */
 function textOfBytes(bytes: number): string {
   return 'r'.repeat(bytes)
 }

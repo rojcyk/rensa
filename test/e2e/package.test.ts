@@ -104,7 +104,6 @@ async function releaseWorkflow(): Promise<Workflow> {
   return parse(await readFile(path.join(ROOT, '.github/workflows/release.yml'), 'utf8')) as Workflow
 }
 
-/** Every step of every job, in file order. */
 function allSteps(wf: Workflow): WorkflowStep[] {
   return Object.values(wf.jobs).flatMap((job) => job.steps)
 }

@@ -106,7 +106,6 @@ export class RunView {
     })
   }
 
-  /** The run id. */
   get id(): string {
     return this.handle.id
   }

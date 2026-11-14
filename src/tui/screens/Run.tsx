@@ -374,7 +374,6 @@ function RunScreen(
     { active },
   )
 
-  // Layout.
   const { columns, rows: terminalRows } = useSize()
   const inputVariant = isShort(terminalRows) ? 'line' : 'frame'
   const footerRows = overlay?.rows ?? INPUT_ROWS[inputVariant]

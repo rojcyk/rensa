@@ -115,6 +115,31 @@ Code should pass the five-second rule: a reader who knows the codebase should un
 - Domain-specific names that are clear to someone who knows the domain, even if unfamiliar to a generalist
 - Straightforward new code that is explicit and adequately typed -- do not add ceremony for its own sake
 
+### Comments
+
+**A comment must carry information the code cannot.** Before writing one, ask: could a reader get this from the name, signature, types, or body in front of them? If yes, do not write it -- it costs reading time, drifts out of date, and dilutes the comments that matter. When reviewing or editing, delete such comments.
+
+Never write:
+- Doc comments that restate a name, getter, field, or one-line body (`/** The run id. */` on `get id()`)
+- `@param id the id` / `@returns the result` tags that add nothing beyond the signature
+- Labels repeating the next line (`// Layout.` above layout math, `// --- follow mode ---` above `describe('follow mode')`)
+- Section banners (`// ----- Helpers -----`) -- method and function names already show the grouping
+- Doc comments on test fixtures that repeat the fixture's own `description:` or obvious content
+
+```ts
+// WRONG -- every comment is derivable from the code under it
+/** True for a non-null, non-array object. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// CORRECT -- the comment states a fact the code cannot show
+/** Linux caps a single argv string at 128 KiB (MAX_ARG_STRLEN); larger prompts go via stdin. */
+const ARGV_TEXT_LIMIT_BYTES = 128 * 1024
+```
+
+Comments worth keeping: why a choice was made, a non-obvious constraint or invariant, an ordering or race reason, an external tool/OS/protocol quirk, a workaround with its trigger, a pointer to behavior defined elsewhere, test intent the assertion alone does not convey, and lint/TS directives. If a comment is mostly restatement with one useful clause, cut it down to that clause.
+
 ## Structural Quality
 
 ### When to extract
@@ -184,4 +209,4 @@ A carve-out match is not eligible for Moderate confidence. If the pattern matche
 
 **Cap stylistic findings when real issues are present.** If the file already carries multiple high-confidence findings (type holes, unsafe casts, structural mixing), do not append low-confidence stylistic observations (rename suggestions, return-type recommendations on functions where TypeScript already infers correctly, comment-density requests, formatting nits, speculative architectural notes). The reader's attention budget is finite; the items most likely to be acted on are the load-bearing ones at the top. Padding the tail with taste-level concerns dilutes the signal and trains the reader to skim past the whole list.
 
-**Rank findings under attention pressure.** When the file carries more high-confidence findings than the reader can act on at once (roughly 6+ distinct concerns), prioritize type-safety findings (`any`, unsafe casts, broken predicates, nullability holes, non-null assertions, falsy narrowing on numbers) over structural and exhaustiveness findings, and prioritize both over documentation-style findings (missing return types on exports, naming clarity). Type holes have direct, observable consequences; structural mixing and missing exhaustiveness checks are often second-order or hypothetical; documentation-style findings are valuable as a default but lowest-priority when the list is already full of substantive concerns. If forced to drop a finding to keep the list focused, drop in this order: documentation > exhaustiveness > structural > type-safety. The "exported functions should have explicit return types" rule yields when 6+ substantive findings already exist on the file -- the type-safety holes are the ones the reader needs to act on first.
+**Rank findings under attention pressure.** When the file carries more high-confidence findings than the reader can act on at once (roughly 6+ distinct concerns), prioritize type-safety findings (`any`, unsafe casts, broken predicates, nullability holes, non-null assertions, falsy narrowing on numbers) over structural and exhaustiveness findings, and prioritize both over documentation-style findings (missing return types on exports, naming clarity, comments that restate code). Type holes have direct, observable consequences; structural mixing and missing exhaustiveness checks are often second-order or hypothetical; documentation-style findings are valuable as a default but lowest-priority when the list is already full of substantive concerns. If forced to drop a finding to keep the list focused, drop in this order: documentation > exhaustiveness > structural > type-safety. The "exported functions should have explicit return types" rule yields when 6+ substantive findings already exist on the file -- the type-safety holes are the ones the reader needs to act on first.

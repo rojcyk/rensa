@@ -503,7 +503,6 @@ export class TranscriptViewport {
     return { ...this.anchorPos }
   }
 
-  /** The current wrap width. */
   get width(): number {
     return this.wrapWidth
   }

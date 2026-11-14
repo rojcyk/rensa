@@ -485,8 +485,6 @@ describe('keeping the reading position', () => {
   })
 })
 
-// --- follow mode -----------------------------------------------------------
-
 describe('follow mode', () => {
   it('starts following and shows the last lines when first drawn', () => {
     const { viewport } = viewportOf(entries(0, 10), 40)
@@ -564,8 +562,6 @@ describe('follow mode', () => {
     ])
   })
 })
-
-// --- the streaming tail ----------------------------------------------------
 
 const LINE_1 = 'Reading the four new tests in quote.ratelimit.test.ts to understand the window.'
 const LINE_2 = 'The token bucket is keyed on the API key header and refills every second.'

@@ -33,7 +33,6 @@ function doctor(cwd: string, home: string, vars: Record<string, string | undefin
   return runCli(['doctor'], { cwd, env: cliEnv(home, vars) })
 }
 
-/** The fake provider's row, with runs of spaces collapsed. */
 function fakeRow(stdout: string): string | undefined {
   return linesOf(stdout)
     .find((line) => line.startsWith('fake '))

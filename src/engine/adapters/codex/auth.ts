@@ -2,6 +2,7 @@ import { diag } from '../../diag.js'
 import { spawnProcess } from '../../process/spawn.js'
 import { findOnPath } from '../path.js'
 import type { Availability, AvailabilityOptions } from '../types.js'
+import { parseVersion } from '../version.js'
 
 const SCOPE = 'codex.auth'
 // `checkProviders` counts its 3 s from before `available()` is called and
@@ -70,12 +71,6 @@ async function readLoggedIn(
     return true
   }
   return loggedIn
-}
-
-/** The first line of `codex --version`, trimmed, e.g. `codex-cli 0.166.0`. */
-export function parseVersion(stdout: string): string | undefined {
-  const first = stdout.split('\n', 1)[0]?.trim()
-  return first === undefined || first === '' ? undefined : first
 }
 
 /**

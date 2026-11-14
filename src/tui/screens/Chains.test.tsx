@@ -265,8 +265,6 @@ const SIX_CHAINS: ChainFixture[] = [
   'flaky-triage',
 ].map((name) => ({ name, description: `Runs the ${name} chain.`, uses: ['claude'] }))
 
-// --- tests -----------------------------------------------------------------
-
 describe('the frame with providers checked', () => {
   it('matches the mock when three providers are in the three states and one chain is broken', async () => {
     const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES) })

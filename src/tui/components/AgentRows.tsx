@@ -26,7 +26,6 @@ export interface AgentRowsProps {
   rows: ReadonlyArray<AgentRowSpec>
 }
 
-/** Rows `AgentRows` renders for `rows`: one each. */
 export function agentRowsHeight(rows: ReadonlyArray<AgentRowSpec>): number {
   return rows.length
 }

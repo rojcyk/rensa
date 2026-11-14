@@ -461,8 +461,6 @@ function noteRow(s: Screen): string {
   return s.lines().find((l) => l.startsWith('│ ›')) ?? ''
 }
 
-// --- tests -----------------------------------------------------------------
-
 describe('focus routing between the screen and the note box', () => {
   it('moves the caret and leaves the step selection and follow mode alone when abc is typed and left pressed twice', async () => {
     const s = mountLive(live(TO_IMPLEMENT))
@@ -1302,8 +1300,6 @@ describe('runs from the fake provider', () => {
     expect(onReview).toContain('› fake')
   }, 20_000)
 })
-
-// --- the running mock ------------------------------------------------------
 
 describe('the running mock fed with a fake-provider run', () => {
   let env: EngineRepo | undefined

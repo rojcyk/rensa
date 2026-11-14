@@ -58,7 +58,6 @@ export interface RunListeners {
 
 export interface RunHandle {
   id: string
-  /** The run directory. */
   dir: string
   pause(): void
   resume(): void
@@ -178,10 +177,6 @@ export class Runner implements RunHandle {
     })
   }
 
-  // -------------------------------------------------------------------------
-  // Handle
-  // -------------------------------------------------------------------------
-
   result(): RunResult | undefined {
     return this.finalResult
   }
@@ -267,10 +262,6 @@ export class Runner implements RunHandle {
     this.wake = undefined
     return wake
   }
-
-  // -------------------------------------------------------------------------
-  // Loop
-  // -------------------------------------------------------------------------
 
   private stopping(): boolean {
     return this.state === 'aborting' || this.fatal !== undefined
@@ -360,10 +351,6 @@ export class Runner implements RunHandle {
     // resume() leaves `running`, abort() leaves `aborting`.
     await woken
   }
-
-  // -------------------------------------------------------------------------
-  // Steps
-  // -------------------------------------------------------------------------
 
   private async runShell(step: ShellStep, index: number, kill: KillSignal): Promise<StepOutcome> {
     if (this.stopping() || kill.killed) return { status: 'killed' }
@@ -690,11 +677,6 @@ export class Runner implements RunHandle {
     })
   }
 
-  // -------------------------------------------------------------------------
-  // Emission
-  // -------------------------------------------------------------------------
-
-  /** Appends to the log, then delivers. */
   private emit(e: NewRunEvent): void {
     this.deliver(this.o.log.append(e))
   }
@@ -761,10 +743,6 @@ export class Runner implements RunHandle {
       this.storageFailed(err, step)
     }
   }
-
-  // -------------------------------------------------------------------------
-  // Failure and finish
-  // -------------------------------------------------------------------------
 
   /** A failed write: remember the first, stop advancing, stop the running child. */
   private storageFailed(err: unknown, step: string | undefined = this.current?.id): void {
