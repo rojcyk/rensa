@@ -367,7 +367,7 @@ const rule = (n: number) => '─'.repeat(n)
  * (`review-codex`, 12) + 2.
  */
 const MOCK_FRAME = [
-  '⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite            tdd-review',
+  '  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite          tdd-review',
   rule(74),
   '',
   `╭${rule(72)}╮`,

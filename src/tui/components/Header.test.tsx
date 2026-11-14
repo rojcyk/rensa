@@ -31,7 +31,7 @@ describe('the header line and rule', () => {
     const lines = header({ columns: 80, rows: 24 })
 
     expect(lines).toEqual([
-      `⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite${' '.repeat(18)}tdd-review`,
+      `  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite${' '.repeat(16)}tdd-review`,
       '─'.repeat(80),
     ])
   })
@@ -40,7 +40,7 @@ describe('the header line and rule', () => {
     const lines = header({ columns: 80, rows: 9 })
 
     expect(lines.map((l) => l.trimEnd())).toEqual([
-      `⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite${' '.repeat(18)}tdd-review`,
+      `  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite${' '.repeat(16)}tdd-review`,
     ])
   })
 })

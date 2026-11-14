@@ -25,7 +25,8 @@ const fg = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`
 const TEXT = fg(230, 230, 230) // theme.text #e6e6e6
 const MUTED = fg(154, 154, 154) // theme.muted #9a9a9a
 const DIM = fg(92, 92, 92) // theme.dim #5c5c5c
-const ACCENT = fg(217, 184, 106) // theme.accent #d9b86a (theme.warn is the same hex)
+const ACCENT = fg(232, 137, 63) // theme.accent #e8893f
+const WARN = fg(217, 184, 106) // theme.warn #d9b86a
 const ERR = fg(212, 122, 122) // theme.err #d47a7a
 
 const KEYS = {
@@ -171,7 +172,7 @@ interface Screen {
   press(input: string, times?: number): Promise<void>
   /** The last frame without escapes, trailing spaces trimmed. */
   lines(): string[]
-  /** Names of the chain rows drawn in `accent`. */
+  /** Names of the chain rows behind the `›` marker; fails if one is not in `accent`. */
   selectedNames(): string[]
   /** The row (0-based, within the body) a chain's name is drawn on, or -1. */
   rowOf(name: string): number
@@ -221,16 +222,15 @@ function mount(opts: {
     },
     lines,
     selectedNames() {
-      return v
+      const marked = v
         .lastFrame()
         .split('\n')
-        .filter((raw) => raw.includes(ACCENT))
-        .map((raw) => stripVTControlCharacters(raw).trimEnd())
-        .filter((l) => /^ {2}\S/.test(l))
-        .map((l) => l.trim())
+        .filter((raw) => stripVTControlCharacters(raw).startsWith('› '))
+      for (const raw of marked) expect(raw).toContain(ACCENT)
+      return marked.map((raw) => stripVTControlCharacters(raw).trimEnd().slice(2))
     },
     rowOf(name) {
-      return lines().indexOf(`  ${name}`)
+      return lines().findIndex((l) => l === `  ${name}` || l === `› ${name}`)
     },
     resize(next) {
       rows = next
@@ -248,7 +248,7 @@ const MOCK_FRAME = [
   '  claude 2.1.3   codex 0.48 · not logged in   grok not installed',
   RULE,
   '',
-  '  tdd-review',
+  '› tdd-review',
   '    Tests first, implementation, three reviewers, routed fixes, re-test.',
   '    ! needs grok',
   '',
@@ -296,7 +296,7 @@ describe('the frame with providers checked', () => {
     expect(frame).toContain(`${TEXT}  review-only`)
     expect(frame).toContain(`${MUTED}    Three reviewers on the current diff.`)
     expect(frame).toContain(`${ERR}    ! agents.codex: unknown provider "codx"`)
-    expect(frame).toContain(`${ACCENT}    ! needs grok`)
+    expect(frame).toContain(`${WARN}    ! needs grok`)
   })
 
   it('labels a logged-out provider "not logged in" and comma-joins several missing providers', async () => {
@@ -344,7 +344,7 @@ describe('the frame before the first provider check completes', () => {
       '  checking providers…',
       RULE,
       '',
-      '  tdd-review',
+      '› tdd-review',
       '    Tests first, implementation, three reviewers, routed fixes, re-test.',
       '',
       '  review-only',
@@ -365,7 +365,13 @@ describe('the frame before the first provider check completes', () => {
 
     engine.completeCheck(MOCK_STATUSES)
 
-    await frameSettles(() => expect(s.lines()).toEqual(MOCK_FRAME))
+    await frameSettles(() =>
+      expect(s.lines()).toEqual(
+        MOCK_FRAME.map((l) =>
+          l === '› tdd-review' ? '  tdd-review' : l === '  review-only' ? '› review-only' : l,
+        ),
+      ),
+    )
     expect(s.selectedNames()).toEqual(['review-only'])
   })
 
@@ -526,7 +532,7 @@ describe('the rule under the provider line', () => {
     const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), rows: 9 })
     await effects()
 
-    expect(s.lines().slice(0, 3)).toEqual([MOCK_FRAME[0], '', '  tdd-review'])
+    expect(s.lines().slice(0, 3)).toEqual([MOCK_FRAME[0], '', '› tdd-review'])
   })
 })
 

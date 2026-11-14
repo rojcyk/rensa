@@ -17,7 +17,8 @@ export interface HeaderProps {
 }
 
 /**
- * `⎇ branch (mode)  path` on the left, `right` on the right, a rule
+ * `⎇ branch (mode)  path` on the left, indented two columns like the
+ * screen bodies, `right` on the right, a rule
  * below. Follows the current width at once; it wraps nothing. In `short`
  * compact mode the rule is omitted.
  */
@@ -26,7 +27,7 @@ export function Header(props: HeaderProps): ReactNode {
   const { columns, rows } = useSize()
   return (
     <Box flexDirection="column" width={columns}>
-      <Box width={columns}>
+      <Box width={columns} paddingLeft={2}>
         <Box flexGrow={1} flexShrink={1} overflow="hidden">
           <Text wrap="truncate-end">
             <Text color={theme.text}>⎇ {branch}</Text>

@@ -1325,7 +1325,7 @@ describe('the running mock fed with a fake-provider run', () => {
 
     const rule = (n: number) => '─'.repeat(n)
     expect(s.lines()).toEqual([
-      `⎇ main (in place)  ~/Repos/trezor-suite${' '.repeat(31)}tdd-review`,
+      `  ⎇ main (in place)  ~/Repos/trezor-suite${' '.repeat(29)}tdd-review`,
       rule(80),
       `${' '.repeat(55)}run 7f3a · 4:12 · running`,
       '',

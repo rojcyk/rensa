@@ -24,7 +24,7 @@ const fg = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`
 const TEXT = fg(230, 230, 230) // theme.text #e6e6e6
 const MUTED = fg(154, 154, 154) // theme.muted #9a9a9a
 const DIM = fg(92, 92, 92) // theme.dim #5c5c5c
-const ACCENT = fg(217, 184, 106) // theme.accent #d9b86a
+const ACCENT = fg(232, 137, 63) // theme.accent #e8893f
 
 let unmount: (() => void) | undefined
 

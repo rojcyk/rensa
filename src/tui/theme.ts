@@ -11,7 +11,7 @@ export const theme = {
   /** Separators inside panes. */
   faint: '#3a3a3a',
   /** Running step, selection. */
-  accent: '#d9b86a',
+  accent: '#e8893f',
   ok: '#7fb77e',
   err: '#d47a7a',
   warn: '#d9b86a',

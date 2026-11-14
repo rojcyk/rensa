@@ -4,7 +4,7 @@ import type { ChainSummary, ProviderStatus } from '../../engine/index.js'
 import { theme } from '../theme.js'
 
 /**
- * One chain: its name (in `accent` when selected), then the description
+ * One chain: its name (in `accent` behind a `›` marker when selected), then the description
  * in `muted` or, for a chain that failed to load, `! <error>` in `err`,
  * then `! needs grok, codex not logged in` in `warn` when providers it
  * uses are not ready. Every line truncates, so the row is exactly
@@ -16,7 +16,7 @@ export function ChainRow(props: { summary: ChainSummary; selected: boolean }): R
   return (
     <Box flexDirection="column" flexShrink={0}>
       <Text color={selected ? theme.accent : theme.text} wrap="truncate-end">
-        {`  ${name}`}
+        {`${selected ? '›' : ' '} ${name}`}
       </Text>
       {error !== undefined ? (
         <Text color={theme.err} wrap="truncate-end">
