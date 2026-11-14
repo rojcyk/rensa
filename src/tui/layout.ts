@@ -25,6 +25,12 @@ export const SPLIT_GUTTER = 3
  */
 export const SINGLE_GUTTER = 2
 
+/**
+ * Columns the header keeps clear of each side edge. The run screen's status
+ * line keeps the same clear of the right edge, so the two end in one column.
+ */
+export const EDGE_INSET = 2
+
 /** `both` is `narrow` and `short` at once. */
 export type Compact = 'none' | 'narrow' | 'short' | 'both'
 

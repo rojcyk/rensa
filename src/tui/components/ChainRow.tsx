@@ -1,17 +1,29 @@
 import { Box, Text } from 'ink'
 import type { ReactNode } from 'react'
 import type { ChainSummary, ProviderStatus } from '../../engine/index.js'
+import { oneLine, wrapLines } from '../format.js'
 import { theme } from '../theme.js'
+
+/** Lines a description may wrap onto before it ends in `…`. */
+export const DESCRIPTION_MAX_LINES = 3
+
+/** Cells left of the description and error text. */
+const INDENT = '  '
 
 /**
  * One chain: its name (in `accent` behind a `›` marker when selected), then the description
- * in `muted` or, for a chain that failed to load, `! <error>` in `err`,
- * then `! needs grok, codex not logged in` in `warn` when providers it
- * uses are not ready. Every line truncates, so the row is exactly
- * `chainRowHeight(summary)` rows tall.
+ * in `muted`, word-wrapped to `width` on up to `DESCRIPTION_MAX_LINES` lines, or, for a
+ * chain that failed to load, `! <error>` in `err`, then `! needs grok, codex not logged in`
+ * in `warn` when providers it uses are not ready. Every line also truncates, so the row is
+ * exactly `chainRowHeight(summary, width)` rows tall.
  */
-export function ChainRow(props: { summary: ChainSummary; selected: boolean }): ReactNode {
-  const { summary, selected } = props
+export function ChainRow(props: {
+  summary: ChainSummary
+  selected: boolean
+  /** Cells the row wraps its description to. */
+  width: number
+}): ReactNode {
+  const { summary, selected, width } = props
   const { name, description, error, missingProviders } = summary
   return (
     <Box flexDirection="column" flexShrink={0}>
@@ -20,14 +32,16 @@ export function ChainRow(props: { summary: ChainSummary; selected: boolean }): R
       </Text>
       {error !== undefined ? (
         <Text color={theme.err} wrap="truncate-end">
-          {`  ! ${oneLine(error.message)}`}
+          {`${INDENT}! ${oneLine(error.message)}`}
         </Text>
       ) : (
-        description !== undefined && (
-          <Text color={theme.muted} wrap="truncate-end">
-            {`  ${oneLine(description)}`}
+        description !== undefined &&
+        descriptionLines(description, width).map((line, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: lines have no identity beyond position
+          <Text key={i} color={theme.muted} wrap="truncate-end">
+            {`${INDENT}${line}`}
           </Text>
-        )
+        ))
       )}
       {missingProviders.length > 0 && (
         <Text color={theme.warn} wrap="truncate-end">
@@ -38,11 +52,21 @@ export function ChainRow(props: { summary: ChainSummary; selected: boolean }): R
   )
 }
 
-/** Rows `ChainRow` renders for the summary. */
-export function chainRowHeight(summary: ChainSummary): number {
-  const second = summary.error !== undefined || summary.description !== undefined ? 1 : 0
-  const third = summary.missingProviders.length > 0 ? 1 : 0
-  return 1 + second + third
+/** Rows `ChainRow` renders for the summary at `width`. */
+export function chainRowHeight(summary: ChainSummary, width: number): number {
+  const { error, description } = summary
+  const middle =
+    error !== undefined
+      ? 1
+      : description !== undefined
+        ? descriptionLines(description, width).length
+        : 0
+  const warning = summary.missingProviders.length > 0 ? 1 : 0
+  return 1 + middle + warning
+}
+
+function descriptionLines(description: string, width: number): string[] {
+  return wrapLines(description, width - INDENT.length, DESCRIPTION_MAX_LINES)
 }
 
 function missingLabel(status: ProviderStatus): string {
@@ -57,11 +81,6 @@ function missingLabel(status: ProviderStatus): string {
     default:
       return exhaustive(availability)
   }
-}
-
-/** A multi-line description or message folded onto its row. */
-function oneLine(text: string): string {
-  return text.replace(/\s*\n\s*/g, ' ').trim()
 }
 
 function exhaustive(value: never): never {

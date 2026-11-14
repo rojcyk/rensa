@@ -2,6 +2,7 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import type { RunProgress } from '../../engine/index.js'
 import { oneLine } from '../format.js'
+import { EDGE_INSET } from '../layout.js'
 import { theme } from '../theme.js'
 import { Elapsed } from './Elapsed.js'
 
@@ -15,7 +16,8 @@ export interface StatusLineProps {
 }
 
 /**
- * `run <id tail> · <elapsed> · <state>`, right-aligned, one row. In
+ * `run <id tail> · <elapsed> · <state>`, right-aligned to end where the
+ * header's right part ends (`EDGE_INSET` from the edge), one row. In
  * `muted`, the state in its color. Re-renders only when `progress`
  * changes; the elapsed cell ticks itself and stops once the run has a
  * `finishedAt`. A long state (`failed · <message>`) truncates with `…`.
@@ -24,7 +26,14 @@ export const StatusLine = memo(function StatusLine(props: StatusLineProps) {
   const { runId, progress, width } = props
   const { text, color } = runState(progress)
   return (
-    <Box width={width} height={1} flexShrink={0} justifyContent="flex-end" overflow="hidden">
+    <Box
+      width={width}
+      height={1}
+      flexShrink={0}
+      paddingRight={EDGE_INSET}
+      justifyContent="flex-end"
+      overflow="hidden"
+    >
       <Text color={theme.muted} wrap="truncate-end">
         {`run ${runId.slice(-ID_TAIL)} · `}
         {progress.startedAt !== undefined && (

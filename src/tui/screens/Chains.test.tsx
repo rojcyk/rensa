@@ -179,6 +179,8 @@ interface Screen {
   /** The row (0-based, within the body) a chain's name is drawn on, or -1. */
   rowOf(name: string): number
   resize(rows: number): void
+  /** A terminal width change; wrapping follows once the width settles. */
+  resizeColumns(columns: number): void
   /** What the app does when an overlay comes up (false) or goes away (true). */
   setActive(active: boolean): void
 }
@@ -193,7 +195,7 @@ function mount(opts: {
   wheel?: WheelHub
 }): Screen {
   const { engine } = opts
-  const columns = opts.columns ?? 80
+  let columns = opts.columns ?? 80
   let rows = opts.rows ?? 24
   let active = opts.active ?? true
   const navigate = vi.fn<Navigate>()
@@ -250,6 +252,11 @@ function mount(opts: {
       rows = next
       v.resize(columns, next)
       v.rerender(tree(next))
+    },
+    resizeColumns(next) {
+      columns = next
+      v.resize(next, rows)
+      v.rerender(tree(rows))
     },
     setActive(next) {
       active = next
@@ -741,5 +748,258 @@ describe('the selection restored on mount', () => {
     expect(s.selectedNames()).toEqual(['tdd-review'])
     expect(s.rowOf('tdd-review')).toBe(3)
     expect(s.navigate.mock.calls).toEqual([[{ name: 'detail', chain: 'tdd-review' }]])
+  })
+})
+
+// --- long descriptions -----------------------------------------------------
+
+/** 40 columns leave 38 cells for a description after its two-column indent. */
+const NARROW = 40
+const NARROW_RULE = '─'.repeat(NARROW)
+
+/** Wraps onto exactly three lines at `NARROW`. */
+const RELEASE_NOTES: ChainFixture = {
+  name: 'release-notes',
+  description:
+    'Plans the release, drafts notes from merged PRs, and opens a draft release for review.',
+  uses: ['claude'],
+}
+const RELEASE_NOTES_LINES = [
+  '  Plans the release, drafts notes from',
+  '  merged PRs, and opens a draft release',
+  '  for review.',
+]
+
+/** Needs more than three lines at `NARROW`. */
+const DEPENDENCY_BUMP: ChainFixture = {
+  name: 'dependency-bump',
+  description:
+    'Bumps one dependency at a time, runs the full test suite after each bump, reverts any bump that breaks the build, and opens one pull request per package that passed.',
+  uses: ['claude'],
+}
+
+describe('a long description wrapped to the terminal width', () => {
+  it('shows a description on two lines with no ellipsis when it wraps onto exactly two lines at 40 columns', async () => {
+    const s = mount({ engine: new StubEngine([REVIEW_ONLY, TDD_REVIEW]), columns: NARROW })
+    await effects()
+
+    // The last chain: nothing follows its second line.
+    expect(s.lines().slice(s.rowOf('tdd-review'))).toEqual([
+      '  tdd-review',
+      '  Tests first, implementation, three',
+      '  reviewers, routed fixes, re-test.',
+    ])
+  })
+
+  it('shows a description on three lines with no ellipsis and starts the next chain after them when it wraps onto exactly three lines', async () => {
+    const s = mount({
+      engine: new StubEngine([RELEASE_NOTES, REVIEW_ONLY], MOCK_STATUSES),
+      columns: NARROW,
+    })
+    await effects()
+
+    expect(s.lines().slice(1)).toEqual([
+      NARROW_RULE,
+      '',
+      '› release-notes',
+      ...RELEASE_NOTES_LINES,
+      '',
+      '  review-only',
+      '  Three reviewers on the current diff.',
+    ])
+  })
+
+  it('cuts a description to three lines ending in an ellipsis within the width when it needs more', async () => {
+    const s = mount({
+      engine: new StubEngine([DEPENDENCY_BUMP, REVIEW_ONLY], MOCK_STATUSES),
+      columns: NARROW,
+    })
+    await effects()
+
+    expect(s.lines().slice(1)).toEqual([
+      NARROW_RULE,
+      '',
+      '› dependency-bump',
+      '  Bumps one dependency at a time, runs',
+      '  the full test suite after each bump,',
+      '  reverts any bump that breaks the buil…',
+      '',
+      '  review-only',
+      '  Three reviewers on the current diff.',
+    ])
+  })
+
+  it('draws every wrapped description line in muted when the description wraps', async () => {
+    const s = mount({
+      engine: new StubEngine([RELEASE_NOTES], MOCK_STATUSES),
+      columns: NARROW,
+    })
+    await effects()
+
+    const frame = s.view.lastFrame()
+    for (const line of RELEASE_NOTES_LINES) expect(frame).toContain(`${MUTED}${line}`)
+  })
+
+  it('puts the missing-provider warning below the last wrapped line when a chain has both', async () => {
+    const s = mount({
+      engine: new StubEngine([TDD_REVIEW, REVIEW_ONLY], MOCK_STATUSES),
+      columns: NARROW,
+    })
+    await effects()
+
+    expect(s.lines().slice(1)).toEqual([
+      NARROW_RULE,
+      '',
+      '› tdd-review',
+      '  Tests first, implementation, three',
+      '  reviewers, routed fixes, re-test.',
+      '  ! needs grok',
+      '',
+      '  review-only',
+      '  Three reviewers on the current diff.',
+    ])
+  })
+
+  it('re-wraps the description to the new width once it settles when the terminal gets narrower', async () => {
+    const s = mount({ engine: new StubEngine([TDD_REVIEW, REVIEW_ONLY], MOCK_STATUSES) })
+    await effects()
+
+    s.resizeColumns(NARROW)
+
+    await frameSettles(() =>
+      expect(s.lines().slice(3, 7)).toEqual([
+        '› tdd-review',
+        '  Tests first, implementation, three',
+        '  reviewers, routed fixes, re-test.',
+        '  ! needs grok',
+      ]),
+    )
+    expect(s.rowOf('review-only')).toBe(8)
+  })
+})
+
+describe('scrolling when descriptions wrap onto several lines', () => {
+  // 12 rows: header 2, body 10, provider line and rule 2, list 8. At 40
+  // columns a three-line chain takes five rows with its gap, so only one fits.
+  const ROWS = 12
+  const BODY_ROWS = ROWS - 2
+
+  /** Six chains whose descriptions wrap onto three lines at 40 columns. */
+  const WRAPPED: ChainFixture[] = [
+    'tdd-review',
+    'review-only',
+    'nightly-audit',
+    'release-notes',
+    'dependency-bump',
+    'flaky-triage',
+  ].map((name) => ({
+    name,
+    description: `Runs the ${name} chain on the current checkout, then posts a summary of every step to the run log.`,
+    uses: ['claude'],
+  }))
+
+  /** Rows from the selected chain's name through its last row, within the body. */
+  function selectedSpan(s: Screen, name: string): { first: number; last: number } {
+    const first = s.rowOf(name)
+    let last = first
+    while ((s.lines()[last + 1] ?? '') !== '') last++
+    return { first, last }
+  }
+
+  it('shows the whole wrapped description of the last chain inside the body when moving to it', async () => {
+    const s = mount({
+      engine: new StubEngine(WRAPPED, MOCK_STATUSES),
+      columns: NARROW,
+      rows: ROWS,
+    })
+    await effects()
+
+    await s.press(KEYS.down, 5)
+
+    expect(s.lines().slice(1)).toEqual([
+      NARROW_RULE,
+      '',
+      '› flaky-triage',
+      '  Runs the flaky-triage chain on the',
+      '  current checkout, then posts a summary',
+      '  of every step to the run log.',
+    ])
+  })
+
+  it('keeps every selected chain and all its wrapped lines inside the body while stepping down and back up', async () => {
+    const s = mount({
+      engine: new StubEngine(WRAPPED, MOCK_STATUSES),
+      columns: NARROW,
+      rows: ROWS,
+    })
+    await effects()
+
+    const outside: string[] = []
+    const visit = (name: string) => {
+      const { first, last } = selectedSpan(s, name)
+      if (first <= 0 || last - first !== 3 || last >= BODY_ROWS)
+        outside.push(`${name}@${first}-${last}`)
+    }
+    for (const chain of WRAPPED.slice(1)) {
+      await s.press(KEYS.down)
+      visit(chain.name)
+    }
+    for (const chain of WRAPPED.slice(0, -1).reverse()) {
+      await s.press(KEYS.up)
+      visit(chain.name)
+    }
+
+    expect(outside).toEqual([])
+    expect(s.rowOf('tdd-review')).toBe(3)
+  })
+
+  it('keeps the selected chain and its wrapped lines inside the body when two- and three-line descriptions alternate', async () => {
+    // Blocks of four and five rows: no two neighbours fit the eight list rows together.
+    const mixed: ChainFixture[] = WRAPPED.map((c, i) =>
+      i % 2 === 0
+        ? c
+        : { ...c, description: 'Reviews the current diff with three reviewers and routes fixes.' },
+    )
+    const s = mount({
+      engine: new StubEngine(mixed, MOCK_STATUSES),
+      columns: NARROW,
+      rows: ROWS,
+    })
+    await effects()
+
+    const outside: string[] = []
+    const visit = (name: string) => {
+      const { first, last } = selectedSpan(s, name)
+      if (first <= 0 || last >= BODY_ROWS) outside.push(`${name}@${first}-${last}`)
+    }
+    for (const chain of mixed.slice(1)) {
+      await s.press(KEYS.down)
+      visit(chain.name)
+    }
+    for (const chain of mixed.slice(0, -1).reverse()) {
+      await s.press(KEYS.up)
+      visit(chain.name)
+    }
+
+    expect(outside).toEqual([])
+  })
+
+  it('shows the whole wrapped description of initialChain at the top of the list on mount', async () => {
+    const s = mount({
+      engine: new StubEngine(WRAPPED, MOCK_STATUSES),
+      columns: NARROW,
+      rows: ROWS,
+      initialChain: 'dependency-bump',
+    })
+    await effects()
+
+    // Rows below the body are the app's to clip; the selected chain fills the list.
+    expect(s.lines().slice(2, 7)).toEqual([
+      '',
+      '› dependency-bump',
+      '  Runs the dependency-bump chain on the',
+      '  current checkout, then posts a summary',
+      '  of every step to the run log.',
+    ])
   })
 })

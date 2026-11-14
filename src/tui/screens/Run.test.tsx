@@ -1030,6 +1030,26 @@ describe('a run whose storage failed', () => {
     expect(s.raw()[2]).toContain(`${fg(theme.err)}failed · EACCES`)
   })
 
+  it('cuts a long `failed · <message>` state with `…` two columns before the right edge when it does not fit', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW })
+    const run = scriptedRun({
+      id: RUN_ID,
+      dir: RUN_DIR,
+      history: TO_IMPLEMENT,
+      result: STORAGE_FAILED,
+    })
+    const s = mountLive(run, { columns: 80 })
+    await effects()
+
+    const cells = cellsOf(s.raw()[2] ?? '').map((c) => c.char)
+
+    expect(cells).toHaveLength(80)
+    expect(cells.slice(0, 78).join('')).toMatch(
+      /^run 4f2a · 3:42 · failed · EACCES: permission denied, .*…$/,
+    )
+    expect(cells.slice(78)).toEqual([' ', ' '])
+  })
+
   it('unmounts every spinner and stops every elapsed cell when the run failed on storage', async () => {
     vi.useFakeTimers({
       toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'],
@@ -1120,6 +1140,23 @@ describe('narrow terminals', () => {
   })
 })
 
+describe('the status line under the header', () => {
+  it.each([100, 80, 50])(
+    'ends in the same column as the header right part, two columns from the edge, at %i columns',
+    async (columns) => {
+      vi.useFakeTimers({ toFake: ['Date'], now: NOW })
+      const s = mountLive(live(TO_IMPLEMENT), { columns })
+      await effects()
+
+      const [headerLine = '', , status = ''] = s.lines()
+
+      expect(headerLine).toMatch(/rensa 0\.1\.0 \/ tdd-review$/)
+      expect(status).toMatch(/run 4f2a · \d+:\d{2} · running$/)
+      expect([headerLine.length, status.length]).toEqual([columns - 2, columns - 2])
+    },
+  )
+})
+
 describe('painting', () => {
   /** The rows of the body: between the header slot (4) and the note box (3). */
   const bodyRows = (s: Screen) => s.raw().slice(4, -3)
@@ -1170,7 +1207,10 @@ describe('painting', () => {
 
     const status = cellsOf(s.raw()[2] ?? '')
     const shown = 'run 4f2a · 4:12 · running'
-    expect(status.map((c) => c.char).join('')).toBe(`${' '.repeat(100 - shown.length)}${shown}`)
+    // Right-aligned two columns in from the edge, as the header's right part is.
+    expect(status.map((c) => c.char).join('')).toBe(
+      `${' '.repeat(100 - shown.length - 2)}${shown}  `,
+    )
     expect(status.filter((c) => c.bg !== ROOT_BG)).toEqual([])
   })
 
@@ -1300,7 +1340,8 @@ describe('runs from the fake provider', () => {
     const baseline = s.lines().join('\n')
 
     expect(first).toContain(`⎇ ${base} (in place)`)
-    expect(first).toMatch(/· complete\n/)
+    // `complete` ends the status line, followed only by the two-column right inset.
+    expect(first).toMatch(/· complete {2}\n/)
     expect(first).toContain('wrap-up-ok')
     expect(
       s.frames.frames.map((f) => stripVTControlCharacters(f)).filter((f) => f.includes('running')),
@@ -1414,9 +1455,9 @@ describe('the running mock fed with a fake-provider run', () => {
 
     const rule = (n: number) => '─'.repeat(n)
     expect(s.lines()).toEqual([
-      `  ⎇ main (in place)  ~/Repos/trezor-suite${' '.repeat(15)}rensa 0.1.0 / tdd-review`,
+      `  ⎇ main (in place)  ~/Repos/trezor-suite${' '.repeat(13)}rensa 0.1.0 / tdd-review`,
       rule(80),
-      `${' '.repeat(55)}run 7f3a · 4:12 · running`,
+      `${' '.repeat(53)}run 7f3a · 4:12 · running`,
       '',
       // leftCols: `baseline` (8) + 6 = 14; transcriptCols: 80 − 14 − 3 = 63.
       '  ✓ baseline  │  review',

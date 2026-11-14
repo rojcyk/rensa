@@ -1,6 +1,6 @@
 import stringWidth from 'string-width'
 import { describe, expect, it } from 'vitest'
-import { ELLIPSIS, formatElapsed, formatTokens, oneLine, truncateEnd } from './format.js'
+import { ELLIPSIS, formatElapsed, formatTokens, oneLine, truncateEnd, wrapLines } from './format.js'
 
 const SECOND = 1000
 const MINUTE = 60 * SECOND
@@ -94,5 +94,60 @@ describe('truncating text to a number of terminal cells', () => {
 describe('folding a multi-line string onto one line', () => {
   it('joins lines with one space and trims the ends when the command spans lines', () => {
     expect(oneLine('  echo one\n\n   echo two\n')).toBe('echo one echo two')
+  })
+})
+
+describe('word-wrapping text onto a limited number of lines', () => {
+  it('returns one line when the text fits the width', () => {
+    expect(wrapLines('Three reviewers.', 20, 3)).toEqual(['Three reviewers.'])
+  })
+
+  it('breaks between words with no ellipsis when the text wraps onto exactly maxLines lines', () => {
+    expect(wrapLines('Tests first, implementation, three reviewers.', 20, 3)).toEqual([
+      'Tests first,',
+      'implementation,',
+      'three reviewers.',
+    ])
+  })
+
+  it('keeps both lines with no ellipsis when the text wraps onto exactly two of three allowed lines', () => {
+    expect(
+      wrapLines('Tests first, implementation, three reviewers, routed fixes, re-test.', 38, 3),
+    ).toEqual(['Tests first, implementation, three', 'reviewers, routed fixes, re-test.'])
+  })
+
+  it('ends the last kept line in an ellipsis within the width when more lines are needed', () => {
+    const lines = wrapLines('one two three four five six', 9, 2)
+
+    expect(lines).toEqual(['one two', `three fo${ELLIPSIS}`])
+    expect(lines.every((l) => stringWidth(l) <= 9)).toBe(true)
+  })
+
+  it('breaks a word longer than the width mid-word', () => {
+    expect(wrapLines('abcdefghij', 4, 3)).toEqual(['abcd', 'efgh', 'ij'])
+  })
+
+  it('wraps by terminal cells when the text has wide characters', () => {
+    // Each kanji is two cells: two four-kanji words do not fit nine cells together.
+    expect(wrapLines('漢字漢字 漢字漢字 漢字', 9, 3)).toEqual(['漢字漢字', '漢字漢字', '漢字'])
+  })
+
+  it('cuts the ellipsis line by cells when the text has wide characters and needs more lines', () => {
+    const lines = wrapLines('漢字漢字 漢字漢字 漢字漢字', 9, 2)
+
+    expect(lines).toEqual(['漢字漢字', `漢字漢字${ELLIPSIS}`])
+    expect(lines.map((l) => stringWidth(l))).toEqual([8, 9])
+  })
+
+  it('folds line breaks in the source before wrapping', () => {
+    expect(wrapLines('one\ntwo', 20, 3)).toEqual(['one two'])
+  })
+
+  it('returns no lines when the text is only whitespace', () => {
+    expect(wrapLines('  \n ', 20, 3)).toEqual([])
+  })
+
+  it('returns one empty line when the width is below one cell', () => {
+    expect(wrapLines('Three reviewers.', 0, 3)).toEqual([''])
   })
 })

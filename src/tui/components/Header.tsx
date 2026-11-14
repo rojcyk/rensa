@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink'
 import type { ReactNode } from 'react'
-import { isShort } from '../layout.js'
+import { EDGE_INSET, isShort } from '../layout.js'
 import { useSize } from '../size.js'
 import { theme } from '../theme.js'
 import { Rule } from './Rule.js'
@@ -21,7 +21,7 @@ export interface HeaderProps {
 
 /**
  * `⎇ branch (mode)  path` on the left, indented two columns like the
- * screen bodies, `rensa <version> / <chain>` on the right, a rule
+ * screen bodies, `rensa <version> / <chain>` on the right, inset two columns from the edge, a rule
  * below. Follows the current width at once; it wraps nothing. In `short`
  * compact mode the rule is omitted.
  */
@@ -30,7 +30,7 @@ export function Header(props: HeaderProps): ReactNode {
   const { columns, rows } = useSize()
   return (
     <Box flexDirection="column" width={columns}>
-      <Box width={columns} paddingLeft={2}>
+      <Box width={columns} paddingX={EDGE_INSET}>
         <Box flexGrow={1} flexShrink={1} overflow="hidden">
           <Text wrap="truncate-end">
             <Text color={theme.text}>⎇ {branch}</Text>

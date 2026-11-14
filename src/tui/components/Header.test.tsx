@@ -51,13 +51,21 @@ function header(props: HeaderProps, size: { columns: number; rows: number }): st
 }
 
 describe('the header line and rule', () => {
-  it('shows branch, mode, path, the version and the chain above a full-width rule at 80x24', () => {
+  it('shows branch, mode, path, the version and the chain inset two columns on both sides above a full-width rule at 80x24', () => {
     const lines = header(DETAIL, { columns: 80, rows: 24 })
 
     expect(lines).toEqual([
-      `  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite${' '.repeat(2)}rensa 0.1.0 / tdd-review`,
+      '  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-su…  rensa 0.1.0 / tdd-review',
       '─'.repeat(80),
     ])
+  })
+
+  it('ends the right part two columns before the right edge, matching the left inset, when the line fits at 120 columns', () => {
+    const lines = header(DETAIL, { columns: 120, rows: 24 })
+
+    // Ink trims trailing spaces, so the two-column inset shows as a line two short of the width.
+    expect(lines[0]).toHaveLength(118)
+    expect(lines[0]).toMatch(/^ {2}⎇ feat\/quote-limits .* {2}rensa 0\.1\.0 \/ tdd-review$/)
   })
 
   it('shows only the version on the right when no chain is open', () => {
@@ -66,7 +74,7 @@ describe('the header line and rule', () => {
       { columns: 80, rows: 24 },
     )
 
-    expect(lines[0]).toBe(`  ⎇ main  ~/Repos/trezor-suite${' '.repeat(39)}rensa 0.1.0`)
+    expect(lines[0]).toBe(`  ⎇ main  ~/Repos/trezor-suite${' '.repeat(37)}rensa 0.1.0`)
   })
 
   it('draws the version and separator in muted and the chain name in text', () => {
@@ -80,20 +88,21 @@ describe('the header line and rule', () => {
     const lines = header(DETAIL, { columns: 60, rows: 24 })
 
     expect(lines[0]?.slice(-27)).toBe('…  rensa 0.1.0 / tdd-review')
-    expect(lines[0]).toHaveLength(60)
+    // Two columns of padding on the right, trimmed from the frame.
+    expect(lines[0]).toHaveLength(58)
   })
 
   it('drops the left part and cuts the chain name with an ellipsis when the right part does not fit', () => {
     const lines = header(DETAIL, { columns: 24, rows: 24 })
 
-    expect(lines).toEqual(['    rensa 0.1.0 / tdd-r…', '─'.repeat(24)])
+    expect(lines).toEqual(['    rensa 0.1.0 / tdd…', '─'.repeat(24)])
   })
 
   it('omits the rule in short compact mode at 80x9', () => {
     const lines = header(DETAIL, { columns: 80, rows: 9 })
 
     expect(lines.map((l) => l.trimEnd())).toEqual([
-      `  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite${' '.repeat(2)}rensa 0.1.0 / tdd-review`,
+      '  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-su…  rensa 0.1.0 / tdd-review',
     ])
   })
 })

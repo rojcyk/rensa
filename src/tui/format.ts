@@ -1,4 +1,5 @@
 import stringWidth from 'string-width'
+import wrapAnsi from 'wrap-ansi'
 
 /** `m:ss`, or `h:mm:ss` from an hour on. Negative or non-finite input reads as zero. */
 export function formatElapsed(ms: number): string {
@@ -47,6 +48,25 @@ export function truncateEnd(text: string, width: number): string {
 /** A multi-line string folded onto one line: line breaks and the space around them become one space. */
 export function oneLine(text: string): string {
   return text.replace(/\s*\n\s*/g, ' ').trim()
+}
+
+/**
+ * `text` folded onto one line, then word-wrapped to `width` cells in at
+ * most `maxLines` lines. A word longer than `width` breaks mid-word. When
+ * the text needs more lines, the last kept line ends in `…`. Empty text
+ * gives no lines; a width below 1 gives one empty line.
+ */
+export function wrapLines(text: string, width: number, maxLines: number): string[] {
+  const flat = oneLine(text)
+  if (flat === '' || maxLines < 1) return []
+  const cells = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0
+  if (cells === 0) return ['']
+  const lines = wrapAnsi(flat, cells, { hard: true, trim: true }).split('\n')
+  if (lines.length <= maxLines) return lines
+  const kept = lines.slice(0, maxLines)
+  // Greedy wrapping left no room for the next word, so this always overflows and gains the `…`.
+  kept[maxLines - 1] = truncateEnd(`${kept[maxLines - 1]} ${lines[maxLines]}`, cells)
+  return kept
 }
 
 function pad2(n: number): string {

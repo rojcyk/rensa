@@ -56,9 +56,10 @@ export function Chains(props: ChainsProps): ReactNode {
   const snapshot = useEngineSnapshot(engine)
   const { chains } = snapshot
   const { bodyRows } = useBudget({ headerRows: HEADER_ROWS, footerRows }).current
-  const ruled = !isShort(useSize().rows)
+  const { rows, settledColumns } = useSize()
+  const ruled = !isShort(rows)
   const listRows = Math.max(0, bodyRows - providerRows(ruled))
-  const heights = chains.map(chainRowHeight)
+  const heights = chains.map((c) => chainRowHeight(c, settledColumns))
   // `top` starts at 0; `windowTop` below brings the initial selection into view.
   const [selection, setSelection] = useState<Selection>(() => ({
     selected: Math.max(
@@ -122,7 +123,7 @@ export function Chains(props: ChainsProps): ReactNode {
       ) : (
         chains.slice(top).map((summary, i) => (
           <Box key={summary.name} marginTop={1} flexShrink={0}>
-            <ChainRow summary={summary} selected={top + i === selected} />
+            <ChainRow summary={summary} selected={top + i === selected} width={settledColumns} />
           </Box>
         ))
       )}
