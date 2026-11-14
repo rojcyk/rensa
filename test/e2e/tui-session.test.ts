@@ -22,6 +22,8 @@ const BRANCH = 'main'
 const ENTER_ALT = '\x1b[?1049h'
 const LEAVE_ALT = '\x1b[?1049l'
 const SHOW_CURSOR = '\x1b[?25h'
+/** rensa's resize erase; Ink's own full clear homes with `\x1b[1;1H` instead. */
+const HOME_AND_ERASE_DOWN = '\x1b[H\x1b[J'
 const EXIT_MARK = '__EXIT__'
 const DONE_MARK = '__DONE__'
 /** The dev-only probes in src/tui/app.tsx (`RENSA_CRASH=warn`). */
@@ -32,7 +34,7 @@ const SLOW_CHECK_ARGS = 'sleep 30.6789'
 
 type Mode = 'inline' | 'fullscreen'
 const MODES: Mode[] = ['inline', 'fullscreen']
-const modeArgs = (mode: Mode) => (mode === 'fullscreen' ? ['--fullscreen'] : [])
+const modeArgs = (mode: Mode) => (mode === 'fullscreen' ? ['--fullscreen'] : ['--inline'])
 
 let dirs: TmpDir[] = []
 
@@ -194,11 +196,18 @@ async function finish(pty: Pty, cliPid: number | undefined): Promise<Outcome> {
   }
 }
 
-/** Starts rensa in a repository, waits for its first frame, then runs `drive`. */
+/**
+ * Starts rensa in a repository, waits for its first frame, then runs
+ * `drive`. `args` replaces the mode's flag, for the no-flag default.
+ */
 async function scenario(
   mode: Mode,
   drive: (pty: Pty) => Promise<void>,
-  opts: { vars?: Record<string, string | undefined>; slowChecks?: boolean } = {},
+  opts: {
+    vars?: Record<string, string | undefined>
+    slowChecks?: boolean
+    args?: string[]
+  } = {},
 ): Promise<Outcome> {
   const { dir, home } = await repoWithChains()
   const bin = await providerShims(opts.slowChecks ?? false)
@@ -210,7 +219,7 @@ async function scenario(
     PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
     ...opts.vars,
   })
-  const pty = startInPty(modeArgs(mode), dir, env)
+  const pty = startInPty(opts.args ?? modeArgs(mode), dir, env)
   const firstFrame = await pty.waitFor(HEADER_GLYPH)
   // The branch fills in from an effect of the first commit, the same pass
   // in which Ink's useInput turns on raw mode: keys sent before it would
@@ -299,6 +308,37 @@ describe.each(MODES)('a normal quit in %s mode', (mode) => {
     expect(quitTookMs).toBeLessThan(1_000)
     expect(await processesWithArgs(SLOW_CHECK_ARGS)).toEqual([])
     expectSaneTerminal(outcome, mode)
+  })
+})
+
+describe('the default mode', () => {
+  it('enters the alternate screen once, leaves it on esc and exits 0 when rensa is started on a terminal with no mode flag', async () => {
+    const outcome = await scenario(
+      'fullscreen',
+      async (pty) => {
+        pty.term.write('\x1b')
+      },
+      { args: [] },
+    )
+
+    expect(outcome.exitCode).toBe(0)
+    expectSaneTerminal(outcome, 'fullscreen')
+  })
+})
+
+describe('resizing the terminal in fullscreen', () => {
+  it('erases the screen from the top-left and draws the whole frame again when the pty gets wider', async () => {
+    const outcome = await scenario('fullscreen', async (pty) => {
+      const resizedFrom = pty.output().length
+      pty.term.resize(COLUMNS + 20, ROWS)
+      // Each wait throws with the stream when its sequence never arrives.
+      const erasedAt = await pty.waitFor(HOME_AND_ERASE_DOWN, 5_000, resizedFrom)
+      await pty.waitFor(HEADER_GLYPH, 5_000, erasedAt)
+      pty.term.write('\x1b')
+    })
+
+    expect(outcome.exitCode).toBe(0)
+    expectSaneTerminal(outcome, 'fullscreen')
   })
 })
 

@@ -147,10 +147,10 @@ describe('abort', () => {
   })
 
   it('logs only start, abort and finish and creates no agent directory when abort() is called right after start()', async () => {
-    const { open, start, lockFile } = await setup(['sleep-first'])
+    const { open, start, lockFile } = await setup(['abort-at-start'])
     const engine = await open()
 
-    const handle = await start(engine, 'sleep-first')
+    const handle = await start(engine, 'abort-at-start')
     handle.abort()
     const { result, events } = await finished(handle, DEADLINE_MS)
 
@@ -163,9 +163,9 @@ describe('abort', () => {
       ])
       expect(await readdir(path.join(handle.dir, 'agents'))).toEqual([])
       expect(existsSync(lockFile)).toBe(false)
-      expect(await processesWithArgs('sleep 30.6451')).toEqual([])
+      expect(await processesWithArgs('sleep 30.6463')).toEqual([])
     } finally {
-      await killProcessesWithArgs('sleep 30.6451')
+      await killProcessesWithArgs('sleep 30.6463')
     }
   })
 })

@@ -240,9 +240,13 @@ function mount(opts: {
   }
 }
 
+/** The rule under the provider line, at the mount's default 80 columns. */
+const RULE = '─'.repeat(80)
+
 /** The plan's mock, body only: the header belongs to the app. */
 const MOCK_FRAME = [
   '  claude 2.1.3   codex 0.48 · not logged in   grok not installed',
+  RULE,
   '',
   '  tdd-review',
   '    Tests first, implementation, three reviewers, routed fixes, re-test.',
@@ -338,6 +342,7 @@ describe('the frame before the first provider check completes', () => {
 
     expect(s.lines()).toEqual([
       '  checking providers…',
+      RULE,
       '',
       '  tdd-review',
       '    Tests first, implementation, three reviewers, routed fixes, re-test.',
@@ -391,7 +396,7 @@ describe('the empty state', () => {
     const s = mount({ engine: new StubEngine([], MOCK_STATUSES) })
     await effects()
 
-    expect(s.lines()).toEqual([MOCK_FRAME[0], '', '  no chains in .rensa/'])
+    expect(s.lines()).toEqual([MOCK_FRAME[0], RULE, '', '  no chains in .rensa/'])
     expect(s.view.lastFrame()).toContain(`${MUTED}  no chains in .rensa/`)
   })
 
@@ -509,8 +514,24 @@ describe('rechecking providers', () => {
   })
 })
 
+describe('the rule under the provider line', () => {
+  it('spans the terminal width when the terminal is 120 columns wide', async () => {
+    const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), columns: 120 })
+    await effects()
+
+    expect(s.lines()[1]).toBe('─'.repeat(120))
+  })
+
+  it('is dropped, like the header rule, when the terminal is short', async () => {
+    const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), rows: 9 })
+    await effects()
+
+    expect(s.lines().slice(0, 3)).toEqual([MOCK_FRAME[0], '', '  tdd-review'])
+  })
+})
+
 describe('scrolling at a short terminal height', () => {
-  // 12 rows: header 2, body 10, provider line 1, list 9 = three chains of three rows.
+  // 12 rows: header 2, body 10, provider line and rule 2, list 8 = two chains of three rows.
   const ROWS = 12
   const BODY_ROWS = ROWS - 2
 
@@ -537,7 +558,7 @@ describe('scrolling at a short terminal height', () => {
     await s.press(KEYS.up, 5)
 
     expect(s.selectedNames()).toEqual(['tdd-review'])
-    expect(s.rowOf('tdd-review')).toBe(2)
+    expect(s.rowOf('tdd-review')).toBe(3)
   })
 
   it('keeps every intermediate selection inside the body while stepping down', async () => {
@@ -608,7 +629,7 @@ describe('the selection restored on mount', () => {
     await s.press(KEYS.enter)
 
     expect(s.selectedNames()).toEqual(['tdd-review'])
-    expect(s.rowOf('tdd-review')).toBe(2)
+    expect(s.rowOf('tdd-review')).toBe(3)
     expect(s.navigate.mock.calls).toEqual([[{ name: 'detail', chain: 'tdd-review' }]])
   })
 })

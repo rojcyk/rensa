@@ -2,7 +2,7 @@ import { PROVIDERS, type Provider, type RunInput } from '../engine/index.js'
 
 export const USAGE = `usage:
   rensa [<chain>]                           open the TUI, on the chain if given
-        [--fullscreen | --inline]           use the alternate screen, or not
+        [--fullscreen | --inline]           full window (default), or in the scrollback
   rensa run <chain> [input text]            run a chain with no UI
         [--input-file <path>]               read the input from a file
         [--base <ref>]                      override the chain's base ref

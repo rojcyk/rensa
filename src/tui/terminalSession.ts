@@ -6,18 +6,20 @@ import { onDiag, onShutdown } from '../engine/index.js'
 import { MAX_FPS } from './frameRate.js'
 
 // The terminal session: mode resolution, Ink's render options, normal
-// quit and the fatal restore. The restore's writes below are the one
-// sanctioned use of process.stdout under src/tui/; nothing else in the TUI
-// writes to the terminal except Ink.
+// quit and the fatal restore. The restore's writes and the fullscreen
+// resize erase below are the only sanctioned uses of process.stdout under
+// src/tui/; nothing else in the TUI writes to the terminal except Ink.
 
 export type Mode = 'inline' | 'fullscreen'
 
-/** Until step 11b decides; the one place the default lives. */
-const DEFAULT_MODE: Mode = 'inline'
+/** The one place the default lives: the alternate screen, full window. */
+const DEFAULT_MODE: Mode = 'fullscreen'
 
 const LEAVE_ALTERNATE_SCREEN = '\x1b[?1049l'
 const SHOW_CURSOR = '\x1b[?25h'
 const RESET_ATTRIBUTES = '\x1b[0m'
+/** Cursor to the top-left cell, then erase to the end of the screen. */
+const HOME_AND_ERASE_DOWN = '\x1b[H\x1b[J'
 
 /** A command-line misuse; the CLI exits 64. */
 export class UsageError extends Error {
@@ -25,14 +27,15 @@ export class UsageError extends Error {
 }
 
 /**
- * The session mode, resolved once at startup. Not a terminal on stdout
- * means inline whatever the flags say. `env` is where step 11b may add a
- * `TERM_PROGRAM` rule.
+ * The session mode, resolved once at startup: fullscreen unless
+ * `--inline`. Not a terminal on stdout means inline whatever the flags say;
+ * not a terminal on stdin means inline unless `--fullscreen`.
  */
 export function resolveMode(
   flags: { fullscreen?: boolean; inline?: boolean },
   _env: NodeJS.ProcessEnv,
   stdoutIsTTY: boolean = Boolean(process.stdout.isTTY),
+  stdinIsTTY: boolean = Boolean(process.stdin.isTTY),
 ): Mode {
   if (flags.fullscreen && flags.inline) {
     throw new UsageError('--fullscreen and --inline cannot be combined')
@@ -40,6 +43,9 @@ export function resolveMode(
   if (!stdoutIsTTY) return 'inline'
   if (flags.fullscreen) return 'fullscreen'
   if (flags.inline) return 'inline'
+  // No keyboard to quit with: Ink unmounts on its own and the alternate
+  // screen would take the output with it.
+  if (!stdinIsTTY) return 'inline'
   return DEFAULT_MODE
 }
 
@@ -143,6 +149,7 @@ export function startSession(
     return lines
   }
   let stopCapture: () => void = () => {}
+  let stopRepaint: () => void = () => {}
   /** Set once Ink has exited and the session released the terminal. */
   let ended = false
 
@@ -151,6 +158,7 @@ export function startSession(
     // through Ink (uncaught exception, signal, a foreign process.exit):
     // an abnormal end, whose captured lines are always printed.
     const abnormal = !ended
+    stopRepaint()
     stopCapture()
     restoreTerminal(instance, owned)
     // After the restore, so the lines land on the primary screen.
@@ -175,6 +183,10 @@ export function startSession(
   owned.rendered = true
   // The root always mounts useInput, which puts a TTY stdin in raw mode.
   owned.rawMode = Boolean(stdin.isTTY)
+  if (entersAlternateScreen) {
+    stopRepaint = repaintOnResize(stdout, instance)
+    teardown.add(stopRepaint)
+  }
 
   const exited = instance.waitUntilExit()
   /** Ink has released the terminal; only our own state is left. */
@@ -256,6 +268,34 @@ function restoreTerminal(instance: Instance | undefined, owned: Ownership): void
   if (owned.rendered) {
     owned.rendered = false
     writeTerminal(RESET_ATTRIBUTES)
+  }
+}
+
+/**
+ * Ink updates a frame relative to where it last left the cursor, and
+ * rewrites only the lines that changed. A resize can break that: a frame
+ * written after the window shrank but before the resize event arrived
+ * wraps, and a terminal that reflows its screen moves rows, so later
+ * frames land offset and leave stale copies behind. On every size change,
+ * before Ink's own resize listener runs, this erases the screen from the
+ * top-left cell and empties Ink's record of the previous frame, so the
+ * next frame is drawn whole from an absolute position. Returns the
+ * function that stops listening; calling it again does nothing.
+ */
+function repaintOnResize(stdout: NodeJS.WriteStream, instance: Instance): () => void {
+  let { columns, rows } = stdout
+  const onResize = () => {
+    if (stdout.columns === columns && stdout.rows === rows) return
+    columns = stdout.columns
+    rows = stdout.rows
+    // Ink's clear erases relative to a cursor that may be off; the
+    // absolute erase after it is what leaves the screen blank.
+    instance.clear()
+    writeTerminal(HOME_AND_ERASE_DOWN)
+  }
+  stdout.prependListener('resize', onResize)
+  return () => {
+    stdout.off('resize', onResize)
   }
 }
 

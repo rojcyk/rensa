@@ -191,22 +191,36 @@ async function settled(promise: Promise<unknown>): Promise<boolean> {
 
 describe('resolving the session mode', () => {
   it.each([
-    [{}, 'inline'],
+    [{}, 'fullscreen'],
     [{ fullscreen: true }, 'fullscreen'],
     [{ inline: true }, 'inline'],
   ] satisfies Array<[{ fullscreen?: boolean; inline?: boolean }, Mode]>)(
-    'resolves %j on a terminal to %s',
+    'resolves %j on a terminal to %s when stdout and stdin are both terminals',
     (flags, mode) => {
-      expect(resolveMode(flags, {}, true)).toBe(mode)
+      expect(resolveMode(flags, {}, true, true)).toBe(mode)
     },
   )
 
   it('throws a usage error when both --fullscreen and --inline are given', () => {
-    expect(() => resolveMode({ fullscreen: true, inline: true }, {}, true)).toThrow(UsageError)
+    expect(() => resolveMode({ fullscreen: true, inline: true }, {}, true, true)).toThrow(
+      UsageError,
+    )
   })
 
   it('resolves to inline when stdout is not a terminal even with --fullscreen', () => {
-    expect(resolveMode({ fullscreen: true }, {}, false)).toBe('inline')
+    expect(resolveMode({ fullscreen: true }, {}, false, true)).toBe('inline')
+  })
+
+  it('resolves to inline when stdout is not a terminal and no flag is given', () => {
+    expect(resolveMode({}, {}, false, true)).toBe('inline')
+  })
+
+  it('resolves to inline when stdout is a terminal, stdin is not and no flag is given', () => {
+    expect(resolveMode({}, {}, true, false)).toBe('inline')
+  })
+
+  it('resolves to fullscreen when stdout is a terminal, stdin is not and --fullscreen is given', () => {
+    expect(resolveMode({ fullscreen: true }, {}, true, false)).toBe('fullscreen')
   })
 })
 
@@ -232,6 +246,144 @@ describe('Ink render options', () => {
       })
     },
   )
+})
+
+describe('repainting on resize', () => {
+  const HOME_AND_ERASE_DOWN = '\x1b[H\x1b[J'
+  const INK_CLEARED = '<ink cleared>'
+  const INK_RESIZED = '<ink resized>'
+  let inkListeners: Array<() => void> = []
+
+  afterEach(() => {
+    for (const listener of inkListeners) process.stdout.off('resize', listener)
+    inkListeners = []
+  })
+
+  /**
+   * Starts a session on a 100x30 terminal whose Ink stub, like Ink,
+   * subscribes to resize inside render and writes to stdout when it
+   * clears, so the order of everything that reaches the terminal shows.
+   */
+  function sessionOnTerminal(mode: Mode) {
+    defineFor(process.stdout, 'columns', 100)
+    defineFor(process.stdout, 'rows', 30)
+    const stub = stubInstance()
+    vi.mocked(stub.instance.clear).mockImplementation(() => {
+      process.stdout.write(INK_CLEARED)
+    })
+    boundary.render = () => {
+      const listener = () => boundary.log.push({ to: 'stdout', text: INK_RESIZED })
+      inkListeners.push(listener)
+      process.stdout.on('resize', listener)
+      return stub.instance
+    }
+    const session = startSession(mode, APP)
+    boundary.log = []
+    return { stub, session }
+  }
+
+  function resizeTo(columns: number, rows: number): void {
+    defineFor(process.stdout, 'columns', columns)
+    defineFor(process.stdout, 'rows', rows)
+    process.stdout.emit('resize')
+  }
+
+  it.each([
+    ['wider', 120, 30],
+    ['narrower', 80, 30],
+    ['taller', 100, 40],
+    ['shorter', 100, 20],
+  ])(
+    'clears Ink, then erases the screen from the top-left, before Ink redraws when the terminal gets %s in fullscreen',
+    (_change, columns, rows) => {
+      sessionOnTerminal('fullscreen')
+
+      resizeTo(columns, rows)
+
+      expect(stdoutText()).toBe(INK_CLEARED + HOME_AND_ERASE_DOWN + INK_RESIZED)
+    },
+  )
+
+  it('leaves the screen alone when a resize event reports the same size in fullscreen', () => {
+    sessionOnTerminal('fullscreen')
+
+    resizeTo(100, 30)
+
+    expect(stdoutText()).toBe(INK_RESIZED)
+  })
+
+  it('erases again on each later size change in fullscreen', () => {
+    sessionOnTerminal('fullscreen')
+
+    resizeTo(120, 30)
+    resizeTo(120, 40)
+
+    const repaint = INK_CLEARED + HOME_AND_ERASE_DOWN + INK_RESIZED
+    expect(stdoutText()).toBe(repaint + repaint)
+  })
+
+  it('leaves resizing to Ink in inline mode', () => {
+    sessionOnTerminal('inline')
+
+    resizeTo(120, 40)
+
+    expect(stdoutText()).toBe(INK_RESIZED)
+  })
+
+  it.each([
+    ['CI is set', 'CI', 'true'],
+    ['CONTINUOUS_INTEGRATION is set', 'CONTINUOUS_INTEGRATION', '1'],
+  ])(
+    'leaves resizing to Ink when fullscreen is requested but %s, so Ink stays off the alternate screen',
+    (_condition, variable, value) => {
+      vi.stubEnv(variable, value)
+      sessionOnTerminal('fullscreen')
+
+      resizeTo(120, 40)
+
+      expect(stdoutText()).toBe(INK_RESIZED)
+    },
+  )
+
+  it('leaves resizing to Ink when fullscreen is requested but stdout is not a terminal', () => {
+    terminal({ stdoutTTY: false, stdinTTY: true })
+    sessionOnTerminal('fullscreen')
+
+    resizeTo(120, 40)
+
+    expect(stdoutText()).toBe(INK_RESIZED)
+  })
+
+  it('stops erasing on resize after a normal quit in fullscreen', async () => {
+    const { session } = sessionOnTerminal('fullscreen')
+    await session.quit()
+    boundary.log = []
+
+    resizeTo(120, 40)
+
+    expect(stdoutText()).toBe(INK_RESIZED)
+  })
+
+  it('stops erasing on resize once Ink exits on its own in fullscreen', async () => {
+    const { stub, session } = sessionOnTerminal('fullscreen')
+    stub.exit.resolve()
+    await session.done
+    boundary.log = []
+
+    resizeTo(120, 40)
+
+    expect(stdoutText()).toBe(INK_RESIZED)
+  })
+
+  it('stops erasing on resize after the fatal restore in fullscreen', () => {
+    sessionOnTerminal('fullscreen')
+    runShutdown()
+    boundary.log = []
+
+    resizeTo(120, 40)
+
+    expect(stdoutText()).toBe(INK_RESIZED)
+  })
 })
 
 describe('observing how Ink exited', () => {

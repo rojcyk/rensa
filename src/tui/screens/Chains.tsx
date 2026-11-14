@@ -5,8 +5,10 @@ import type { Navigate } from '../app.js'
 import { ChainRow, chainRowHeight } from '../components/ChainRow.js'
 import { HEADER_ROWS } from '../components/Header.js'
 import { ProviderLine } from '../components/ProviderLine.js'
+import { Rule } from '../components/Rule.js'
 import { useKeys } from '../hooks/useKeys.js'
-import { useBudget } from '../size.js'
+import { isShort } from '../layout.js'
+import { useBudget, useSize } from '../size.js'
 import { theme } from '../theme.js'
 
 /** The part of the engine this screen reads; a stub needs only these. */
@@ -25,8 +27,11 @@ export interface ChainsProps {
   initialChain?: string
 }
 
-/** Rows above the chain list: the provider line. */
-const PROVIDER_ROWS = 1
+/**
+ * Rows above the chain list: the provider line, and the rule below it
+ * unless the terminal is `short`, where the header drops its rule too.
+ */
+const providerRows = (ruled: boolean) => (ruled ? 2 : 1)
 
 interface Snapshot {
   providers: ProviderStatus[] | undefined
@@ -40,7 +45,7 @@ interface Selection {
 }
 
 /**
- * The first screen: provider availability and the chain list. Reads both
+ * The first screen: provider availability, a rule, and the chain list. Reads both
  * from the engine and re-reads them on every `'providers'` event; never
  * awaits a check. `up`/`down` select, `enter` opens the detail screen,
  * `recheck` starts a new provider check.
@@ -50,7 +55,8 @@ export function Chains(props: ChainsProps): ReactNode {
   const snapshot = useEngineSnapshot(engine)
   const { chains } = snapshot
   const { bodyRows } = useBudget({ headerRows: HEADER_ROWS, footerRows }).current
-  const listRows = Math.max(0, bodyRows - PROVIDER_ROWS)
+  const ruled = !isShort(useSize().rows)
+  const listRows = Math.max(0, bodyRows - providerRows(ruled))
   const heights = chains.map(chainRowHeight)
   // `top` starts at 0; `windowTop` below brings the initial selection into view.
   const [selection, setSelection] = useState<Selection>(() => ({
@@ -103,6 +109,7 @@ export function Chains(props: ChainsProps): ReactNode {
   return (
     <Box flexDirection="column" flexShrink={0}>
       <ProviderLine statuses={snapshot.providers} />
+      {ruled && <Rule />}
       {chains.length === 0 ? (
         <Box marginTop={1} flexShrink={0}>
           <Text color={theme.muted} wrap="truncate-end">
