@@ -13,17 +13,20 @@ export interface HeaderProps {
   mode?: 'in place'
   /** Home-relative. */
   path: string
-  right?: string
+  /** The rensa version, shown on the right as `rensa <version>`. */
+  version: string
+  /** The open chain, shown after the version as `/ <chain>`. */
+  chain?: string
 }
 
 /**
  * `⎇ branch (mode)  path` on the left, indented two columns like the
- * screen bodies, `right` on the right, a rule
+ * screen bodies, `rensa <version> / <chain>` on the right, a rule
  * below. Follows the current width at once; it wraps nothing. In `short`
  * compact mode the rule is omitted.
  */
 export function Header(props: HeaderProps): ReactNode {
-  const { branch, mode, path, right } = props
+  const { branch, mode, path, version, chain } = props
   const { columns, rows } = useSize()
   return (
     <Box flexDirection="column" width={columns}>
@@ -35,13 +38,17 @@ export function Header(props: HeaderProps): ReactNode {
             <Text color={theme.muted}>{`  ${path}`}</Text>
           </Text>
         </Box>
-        {right !== undefined && (
-          <Box flexShrink={0} marginLeft={2}>
-            <Text color={theme.text} wrap="truncate-end">
-              {right}
-            </Text>
-          </Box>
-        )}
+        <Box flexShrink={0} marginLeft={2}>
+          <Text wrap="truncate-end">
+            <Text color={theme.muted}>{`rensa ${version}`}</Text>
+            {chain !== undefined && (
+              <>
+                <Text color={theme.muted}>{' / '}</Text>
+                <Text color={theme.text}>{chain}</Text>
+              </>
+            )}
+          </Text>
+        </Box>
       </Box>
       {!isShort(rows) && <Rule width={columns} />}
     </Box>

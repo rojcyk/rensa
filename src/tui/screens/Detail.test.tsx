@@ -310,7 +310,8 @@ function mount(opts: {
           branch="feat/quote-limits"
           mode="in place"
           path="~/Repos/trezor-suite"
-          right={chain}
+          version="0.1.0"
+          chain={chain}
         />
       }
     />
@@ -367,7 +368,7 @@ const rule = (n: number) => '─'.repeat(n)
  * (`review-codex`, 12) + 2.
  */
 const MOCK_FRAME = [
-  '  ⎇ feat/quote-limits (in place)  ~/Repos/trezor-suite          tdd-review',
+  '  ⎇ feat/quote-limits (in place)  ~/Repos/trezo…  rensa 0.1.0 / tdd-review',
   rule(74),
   '',
   `╭${rule(72)}╮`,

@@ -115,7 +115,8 @@ function Router(props: { engine: Engine; initial: Screen }): ReactNode {
   const headerProps: HeaderProps = {
     branch,
     path: homeRelative(engine.root),
-    ...(screen.name !== 'chains' && { mode: 'in place' as const, right: screen.chain }),
+    version: engine.version,
+    ...(screen.name !== 'chains' && { mode: 'in place' as const, chain: screen.chain }),
   }
   const header = <Header {...headerProps} />
   const quitOverlay = overlay !== undefined && (

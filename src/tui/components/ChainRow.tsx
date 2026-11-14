@@ -20,18 +20,18 @@ export function ChainRow(props: { summary: ChainSummary; selected: boolean }): R
       </Text>
       {error !== undefined ? (
         <Text color={theme.err} wrap="truncate-end">
-          {`    ! ${oneLine(error.message)}`}
+          {`  ! ${oneLine(error.message)}`}
         </Text>
       ) : (
         description !== undefined && (
           <Text color={theme.muted} wrap="truncate-end">
-            {`    ${oneLine(description)}`}
+            {`  ${oneLine(description)}`}
           </Text>
         )
       )}
       {missingProviders.length > 0 && (
         <Text color={theme.warn} wrap="truncate-end">
-          {`    ! ${missingProviders.map(missingLabel).join(', ')}`}
+          {`  ! ${missingProviders.map(missingLabel).join(', ')}`}
         </Text>
       )}
     </Box>

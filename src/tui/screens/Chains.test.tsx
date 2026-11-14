@@ -267,14 +267,14 @@ const MOCK_FRAME = [
   RULE,
   '',
   '› tdd-review',
-  '    Tests first, implementation, three reviewers, routed fixes, re-test.',
-  '    ! needs grok',
+  '  Tests first, implementation, three reviewers, routed fixes, re-test.',
+  '  ! needs grok',
   '',
   '  review-only',
-  '    Three reviewers on the current diff.',
+  '  Three reviewers on the current diff.',
   '',
   '  nightly-audit',
-  '    ! agents.codex: unknown provider "codx"',
+  '  ! agents.codex: unknown provider "codx"',
 ]
 
 /** Six chains, two rows each (name and description): three rows per chain with the gap. */
@@ -312,9 +312,9 @@ describe('the frame with providers checked', () => {
     const frame = s.view.lastFrame()
     expect(s.selectedNames()).toEqual(['tdd-review'])
     expect(frame).toContain(`${TEXT}  review-only`)
-    expect(frame).toContain(`${MUTED}    Three reviewers on the current diff.`)
-    expect(frame).toContain(`${ERR}    ! agents.codex: unknown provider "codx"`)
-    expect(frame).toContain(`${WARN}    ! needs grok`)
+    expect(frame).toContain(`${MUTED}  Three reviewers on the current diff.`)
+    expect(frame).toContain(`${ERR}  ! agents.codex: unknown provider "codx"`)
+    expect(frame).toContain(`${WARN}  ! needs grok`)
   })
 
   it('labels a logged-out provider "not logged in" and comma-joins several missing providers', async () => {
@@ -325,7 +325,7 @@ describe('the frame with providers checked', () => {
     const s = mount({ engine })
     await effects()
 
-    expect(s.lines()).toContain('    ! needs grok, codex not logged in')
+    expect(s.lines()).toContain('  ! needs grok, codex not logged in')
   })
 
   it('hides the fake provider when RENSA_DEV is not 1', async () => {
@@ -363,13 +363,13 @@ describe('the frame before the first provider check completes', () => {
       RULE,
       '',
       '› tdd-review',
-      '    Tests first, implementation, three reviewers, routed fixes, re-test.',
+      '  Tests first, implementation, three reviewers, routed fixes, re-test.',
       '',
       '  review-only',
-      '    Three reviewers on the current diff.',
+      '  Three reviewers on the current diff.',
       '',
       '  nightly-audit',
-      '    ! agents.codex: unknown provider "codx"',
+      '  ! agents.codex: unknown provider "codx"',
     ])
     expect(s.view.lastFrame().split('\n')[0]).toContain(`${MUTED}  checking providers…`)
   })
@@ -537,9 +537,11 @@ describe('moving the selection with the mouse wheel', () => {
     const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), wheel })
     await effects()
 
-    for (let i = 0; i < 5; i++) wheel.emit('down')
-    wheel.emit('up')
+    // Four turns from the first of three chains: wrapping would land on review-only.
+    for (let i = 0; i < 4; i++) wheel.emit('down')
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['nightly-audit']))
 
+    wheel.emit('up')
     await frameSettles(() => expect(s.selectedNames()).toEqual(['review-only']))
   })
 
@@ -618,7 +620,7 @@ describe('rechecking providers', () => {
       expect(s.lines()[0]).toBe('  claude 2.1.3   codex 0.48 · not logged in   grok 0.9.1'),
     )
     // The same frame: the chain list was re-read with the new statuses.
-    expect(s.lines()).not.toContain('    ! needs grok')
+    expect(s.lines()).not.toContain('  ! needs grok')
   })
 })
 
@@ -653,7 +655,7 @@ describe('scrolling at a short terminal height', () => {
     expect(s.selectedNames()).toEqual(['flaky-triage'])
     expect(row).toBeGreaterThan(0)
     expect(row + 1).toBeLessThan(BODY_ROWS)
-    expect(s.lines()[row + 1]).toBe('    Runs the flaky-triage chain.')
+    expect(s.lines()[row + 1]).toBe('  Runs the flaky-triage chain.')
     expect(s.rowOf('tdd-review')).toBe(-1)
     expect(s.lines()[0]).toBe(MOCK_FRAME[0])
   })

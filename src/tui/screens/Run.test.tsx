@@ -213,7 +213,8 @@ const HEADER: HeaderProps = {
   branch: 'main',
   mode: 'in place',
   path: '~/Repos/trezor-suite',
-  right: 'tdd-review',
+  version: '0.1.0',
+  chain: 'tdd-review',
 }
 
 function spawned(step: string, label: string, t: string): ScriptEvent {
@@ -1413,7 +1414,7 @@ describe('the running mock fed with a fake-provider run', () => {
 
     const rule = (n: number) => '─'.repeat(n)
     expect(s.lines()).toEqual([
-      `  ⎇ main (in place)  ~/Repos/trezor-suite${' '.repeat(29)}tdd-review`,
+      `  ⎇ main (in place)  ~/Repos/trezor-suite${' '.repeat(15)}rensa 0.1.0 / tdd-review`,
       rule(80),
       `${' '.repeat(55)}run 7f3a · 4:12 · running`,
       '',
