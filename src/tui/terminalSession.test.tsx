@@ -3,14 +3,7 @@ import type { ReactNode } from 'react'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { diag } from '../engine/index.js'
 import { MAX_FPS } from './frameRate.js'
-import {
-  createTeardown,
-  type Mode,
-  resolveMode,
-  type Session,
-  startSession,
-  UsageError,
-} from './terminalSession.js'
+import { createTeardown, type Session, startSession, terminalProblem } from './terminalSession.js'
 
 // Ink's render and the process exit registry are the two boundaries the
 // session does not own: render is replaced by a stub per test, and the
@@ -189,63 +182,68 @@ async function settled(promise: Promise<unknown>): Promise<boolean> {
   return done
 }
 
-describe('resolving the session mode', () => {
-  it.each([
-    [{}, 'fullscreen'],
-    [{ fullscreen: true }, 'fullscreen'],
-    [{ inline: true }, 'inline'],
-  ] satisfies Array<[{ fullscreen?: boolean; inline?: boolean }, Mode]>)(
-    'resolves %j on a terminal to %s when stdout and stdin are both terminals',
-    (flags, mode) => {
-      expect(resolveMode(flags, {}, true, true)).toBe(mode)
-    },
-  )
+describe('checking for a terminal before the TUI starts', () => {
+  const RUN_HINT = 'use `rensa run <chain>` to run a chain with no UI'
 
-  it('throws a usage error when both --fullscreen and --inline are given', () => {
-    expect(() => resolveMode({ fullscreen: true, inline: true }, {}, true, true)).toThrow(
-      UsageError,
+  it('reports no problem when stdout and stdin are both terminals', () => {
+    expect(terminalProblem(true, true)).toBeUndefined()
+  })
+
+  it('names stdin when stdout is a terminal and stdin is not', () => {
+    expect(terminalProblem(true, false)).toBe(`the TUI needs a terminal on stdin; ${RUN_HINT}`)
+  })
+
+  it('names stdout when stdin is a terminal and stdout is not', () => {
+    expect(terminalProblem(false, true)).toBe(`the TUI needs a terminal on stdout; ${RUN_HINT}`)
+  })
+
+  it('names both when neither stdout nor stdin is a terminal', () => {
+    expect(terminalProblem(false, false)).toBe(
+      `the TUI needs a terminal on stdin and stdout; ${RUN_HINT}`,
     )
   })
 
-  it('resolves to inline when stdout is not a terminal even with --fullscreen', () => {
-    expect(resolveMode({ fullscreen: true }, {}, false, true)).toBe('inline')
+  it('reads the process streams when called with no arguments and stdin is a pipe', () => {
+    terminal({ stdoutTTY: true, stdinTTY: false })
+
+    expect(terminalProblem()).toBe(`the TUI needs a terminal on stdin; ${RUN_HINT}`)
   })
 
-  it('resolves to inline when stdout is not a terminal and no flag is given', () => {
-    expect(resolveMode({}, {}, false, true)).toBe('inline')
-  })
-
-  it('resolves to inline when stdout is a terminal, stdin is not and no flag is given', () => {
-    expect(resolveMode({}, {}, true, false)).toBe('inline')
-  })
-
-  it('resolves to fullscreen when stdout is a terminal, stdin is not and --fullscreen is given', () => {
-    expect(resolveMode({ fullscreen: true }, {}, true, false)).toBe('fullscreen')
+  it('reads the process streams when called with no arguments and both are terminals', () => {
+    expect(terminalProblem()).toBeUndefined()
   })
 })
 
 describe('Ink render options', () => {
-  it.each([
-    ['fullscreen', true],
-    ['inline', false],
-  ] satisfies Array<[Mode, boolean]>)(
-    'renders %s with the five session options',
-    (mode, alternateScreen) => {
-      const stub = stubInstance()
-      boundary.render = () => stub.instance
+  it('renders on the alternate screen, interactive, with the session options', () => {
+    const stub = stubInstance()
+    boundary.render = () => stub.instance
 
-      startSession(mode, APP)
+    startSession(APP)
 
-      expect(renderMock).toHaveBeenCalledTimes(1)
-      expect(renderMock.mock.calls[0]?.[1]).toEqual({
-        alternateScreen,
-        incrementalRendering: true,
-        maxFps: MAX_FPS,
-        exitOnCtrlC: false,
-        patchConsole: false,
-      })
-    },
-  )
+    expect(renderMock).toHaveBeenCalledTimes(1)
+    expect(renderMock.mock.calls[0]?.[1]).toEqual({
+      alternateScreen: true,
+      interactive: true,
+      incrementalRendering: true,
+      maxFps: MAX_FPS,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    })
+  })
+
+  it('still renders interactive on the alternate screen when CI is set', () => {
+    vi.stubEnv('CI', 'true')
+    const stub = stubInstance()
+    boundary.render = () => stub.instance
+
+    startSession(APP)
+
+    expect(renderMock.mock.calls[0]?.[1]).toMatchObject({
+      alternateScreen: true,
+      interactive: true,
+    })
+  })
 })
 
 describe('repainting on resize', () => {
@@ -264,7 +262,7 @@ describe('repainting on resize', () => {
    * subscribes to resize inside render and writes to stdout when it
    * clears, so the order of everything that reaches the terminal shows.
    */
-  function sessionOnTerminal(mode: Mode) {
+  function sessionOnTerminal() {
     defineFor(process.stdout, 'columns', 100)
     defineFor(process.stdout, 'rows', 30)
     const stub = stubInstance()
@@ -277,7 +275,7 @@ describe('repainting on resize', () => {
       process.stdout.on('resize', listener)
       return stub.instance
     }
-    const session = startSession(mode, APP)
+    const session = startSession(APP)
     boundary.log = []
     return { stub, session }
   }
@@ -294,9 +292,9 @@ describe('repainting on resize', () => {
     ['taller', 100, 40],
     ['shorter', 100, 20],
   ])(
-    'clears Ink, then erases the screen from the top-left, before Ink redraws when the terminal gets %s in fullscreen',
+    'clears Ink, then erases the screen from the top-left, before Ink redraws when the terminal gets %s',
     (_change, columns, rows) => {
-      sessionOnTerminal('fullscreen')
+      sessionOnTerminal()
 
       resizeTo(columns, rows)
 
@@ -304,16 +302,16 @@ describe('repainting on resize', () => {
     },
   )
 
-  it('leaves the screen alone when a resize event reports the same size in fullscreen', () => {
-    sessionOnTerminal('fullscreen')
+  it('leaves the screen alone when a resize event reports the same size', () => {
+    sessionOnTerminal()
 
     resizeTo(100, 30)
 
     expect(stdoutText()).toBe(INK_RESIZED)
   })
 
-  it('erases again on each later size change in fullscreen', () => {
-    sessionOnTerminal('fullscreen')
+  it('erases again on each later size change', () => {
+    sessionOnTerminal()
 
     resizeTo(120, 30)
     resizeTo(120, 40)
@@ -322,40 +320,32 @@ describe('repainting on resize', () => {
     expect(stdoutText()).toBe(repaint + repaint)
   })
 
-  it('leaves resizing to Ink in inline mode', () => {
-    sessionOnTerminal('inline')
-
-    resizeTo(120, 40)
-
-    expect(stdoutText()).toBe(INK_RESIZED)
-  })
-
   it.each([
     ['CI is set', 'CI', 'true'],
     ['CONTINUOUS_INTEGRATION is set', 'CONTINUOUS_INTEGRATION', '1'],
   ])(
-    'leaves resizing to Ink when fullscreen is requested but %s, so Ink stays off the alternate screen',
+    'clears Ink and erases the screen before Ink redraws when the terminal resizes and %s',
     (_condition, variable, value) => {
       vi.stubEnv(variable, value)
-      sessionOnTerminal('fullscreen')
+      sessionOnTerminal()
 
       resizeTo(120, 40)
 
-      expect(stdoutText()).toBe(INK_RESIZED)
+      expect(stdoutText()).toBe(INK_CLEARED + HOME_AND_ERASE_DOWN + INK_RESIZED)
     },
   )
 
-  it('leaves resizing to Ink when fullscreen is requested but stdout is not a terminal', () => {
+  it('leaves resizing to Ink when stdout is not a terminal', () => {
     terminal({ stdoutTTY: false, stdinTTY: true })
-    sessionOnTerminal('fullscreen')
+    sessionOnTerminal()
 
     resizeTo(120, 40)
 
     expect(stdoutText()).toBe(INK_RESIZED)
   })
 
-  it('stops erasing on resize after a normal quit in fullscreen', async () => {
-    const { session } = sessionOnTerminal('fullscreen')
+  it('stops erasing on resize after a normal quit', async () => {
+    const { session } = sessionOnTerminal()
     await session.quit()
     boundary.log = []
 
@@ -364,8 +354,8 @@ describe('repainting on resize', () => {
     expect(stdoutText()).toBe(INK_RESIZED)
   })
 
-  it('stops erasing on resize once Ink exits on its own in fullscreen', async () => {
-    const { stub, session } = sessionOnTerminal('fullscreen')
+  it('stops erasing on resize once Ink exits on its own', async () => {
+    const { stub, session } = sessionOnTerminal()
     stub.exit.resolve()
     await session.done
     boundary.log = []
@@ -375,8 +365,8 @@ describe('repainting on resize', () => {
     expect(stdoutText()).toBe(INK_RESIZED)
   })
 
-  it('stops erasing on resize after the fatal restore in fullscreen', () => {
-    sessionOnTerminal('fullscreen')
+  it('stops erasing on resize after the fatal restore', () => {
+    sessionOnTerminal()
     runShutdown()
     boundary.log = []
 
@@ -391,7 +381,7 @@ describe('observing how Ink exited', () => {
     const stub = stubInstance()
     boundary.render = () => stub.instance
 
-    const session = startSession('inline', APP)
+    const session = startSession(APP)
 
     expect(await settled(session.done)).toBe(false)
   })
@@ -399,7 +389,7 @@ describe('observing how Ink exited', () => {
   it('resolves done without quit when Ink exits on its own', async () => {
     const stub = stubInstance()
     boundary.render = () => stub.instance
-    const session = startSession('inline', APP)
+    const session = startSession(APP)
 
     stub.exit.resolve()
 
@@ -418,7 +408,7 @@ describe('observing how Ink exited', () => {
     const teardown = createTeardown()
     const cleanup = vi.fn()
     teardown.add(cleanup)
-    const session = startSession('fullscreen', APP, teardown)
+    const session = startSession(APP, teardown)
     const crash = new Error('Cannot read properties of undefined (reading "status")')
 
     stub.exit.reject(crash)
@@ -433,7 +423,7 @@ describe('observing how Ink exited', () => {
   it('returns the same promise from a second quit and unmounts once', async () => {
     const stub = stubInstance()
     boundary.render = () => stub.instance
-    const session = startSession('inline', APP)
+    const session = startSession(APP)
 
     const first = session.quit()
     const second = session.quit()
@@ -450,7 +440,7 @@ describe('observing how Ink exited', () => {
     boundary.render = () => stub.instance
     const teardown = createTeardown()
     teardown.add(() => order.push('teardown'))
-    const session = startSession('inline', APP, teardown)
+    const session = startSession(APP, teardown)
 
     await session.quit()
 
@@ -458,11 +448,11 @@ describe('observing how Ink exited', () => {
   })
 })
 
-describe('the fatal restore in fullscreen on a terminal', () => {
+describe('the fatal restore on a terminal', () => {
   it('lets Ink unmount and writes nothing of its own, so one leave sequence reaches the terminal', () => {
     const stub = stubInstance(inkLeavesAlternateScreen)
     boundary.render = () => stub.instance
-    startSession('fullscreen', APP)
+    startSession(APP)
 
     runShutdown()
 
@@ -473,7 +463,7 @@ describe('the fatal restore in fullscreen on a terminal', () => {
   it('emits nothing when the callback runs a second time', () => {
     const stub = stubInstance(inkLeavesAlternateScreen)
     boundary.render = () => stub.instance
-    startSession('fullscreen', APP)
+    startSession(APP)
     const [callback] = boundary.shutdown
     assert(callback, 'startSession registered a shutdown callback')
     callback()
@@ -491,7 +481,7 @@ describe('the fatal restore in fullscreen on a terminal', () => {
       throw new Error('yoga node already freed')
     })
     boundary.render = () => stub.instance
-    startSession('fullscreen', APP)
+    startSession(APP)
     const [callback] = boundary.shutdown
     assert(callback, 'startSession registered a shutdown callback')
 
@@ -508,61 +498,38 @@ describe('the fatal restore in fullscreen on a terminal', () => {
       throw new Error('kitty keyboard probe failed')
     }
 
-    expect(() => startSession('fullscreen', APP)).toThrow('kitty keyboard probe failed')
+    expect(() => startSession(APP)).toThrow('kitty keyboard probe failed')
     runShutdown()
 
     expect(count(stdoutText(), LEAVE_ALT)).toBe(1)
     expect(count(stdoutText(), SHOW_CURSOR)).toBe(1)
     expect(stdoutText()).not.toContain(RESET)
   })
-})
 
-describe('the fatal restore in inline mode', () => {
-  it('never leaves the alternate screen when Ink unmounts normally', () => {
-    const stub = stubInstance()
-    boundary.render = () => stub.instance
-    startSession('inline', APP)
-
-    runShutdown()
-
-    expect(stdoutText()).not.toContain(LEAVE_ALT)
-  })
-
-  it('never leaves the alternate screen when Ink unmount throws', () => {
+  it('leaves the alternate screen and shows the cursor itself when Ink unmount throws and CI is set', () => {
+    vi.stubEnv('CI', 'true')
     const stub = stubInstance()
     stub.unmount.mockImplementation(() => {
       throw new Error('yoga node already freed')
     })
     boundary.render = () => stub.instance
-    startSession('inline', APP)
+    startSession(APP)
 
     runShutdown()
 
-    expect(stdoutText()).toBe(RESET)
-    expect(setRawMode.mock.calls).toEqual([[false]])
-  })
-
-  it('emits nothing when render throws before anything rendered', () => {
-    boundary.render = () => {
-      throw new Error('kitty keyboard probe failed')
-    }
-
-    expect(() => startSession('inline', APP)).toThrow('kitty keyboard probe failed')
-    runShutdown()
-
-    expect(stdoutText()).toBe('')
+    expect(stdoutText()).toBe(`${LEAVE_ALT}${SHOW_CURSOR}${RESET}`)
   })
 })
 
 describe('the fatal restore when stdout is not a terminal', () => {
-  it('never leaves the alternate screen in fullscreen mode when Ink unmount throws', () => {
+  it('never leaves the alternate screen when Ink unmount throws', () => {
     terminal({ stdoutTTY: false, stdinTTY: false })
     const stub = stubInstance()
     stub.unmount.mockImplementation(() => {
       throw new Error('yoga node already freed')
     })
     boundary.render = () => stub.instance
-    startSession('fullscreen', APP)
+    startSession(APP)
 
     runShutdown()
 
@@ -585,7 +552,7 @@ describe('capturing foreign output during a session', () => {
   async function sessionWithForeignOutput(): Promise<Session> {
     const stub = stubInstance()
     boundary.render = () => stub.instance
-    const session = startSession('inline', APP)
+    const session = startSession(APP)
     diag('engine', 'provider check for codex took 4100 ms')
     // biome-ignore lint/suspicious/noConsole: the dependency output being captured
     console.warn('punycode is deprecated')
@@ -641,14 +608,14 @@ describe('capturing foreign output during a session', () => {
 })
 
 describe('handing out captured lines', () => {
-  function sessionWith(mode: Mode, onUnmount: () => void = () => {}) {
+  function sessionWith(onUnmount: () => void = () => {}) {
     const stub = stubInstance(onUnmount)
     boundary.render = () => stub.instance
-    return startSession(mode, APP)
+    return startSession(APP)
   }
 
   it('hands out each captured line once', () => {
-    const session = sessionWith('inline')
+    const session = sessionWith()
     // biome-ignore lint/suspicious/noConsole: the dependency output being captured
     console.log('first dependency line')
     const first = session.drainCaptured()
@@ -663,7 +630,7 @@ describe('handing out captured lines', () => {
   })
 
   it('prints the undrained lines once, on stderr after the terminal is restored, when the process dies during the session', () => {
-    const session = sessionWith('fullscreen', inkLeavesAlternateScreen)
+    const session = sessionWith(inkLeavesAlternateScreen)
     // biome-ignore lint/suspicious/noConsole: the dependency output being captured
     console.log('already shown line')
     session.drainCaptured()
@@ -683,7 +650,7 @@ describe('handing out captured lines', () => {
   })
 
   it('prints nothing at exit after a normal quit when RENSA_DEBUG is not set', async () => {
-    const session = sessionWith('inline')
+    const session = sessionWith()
     // biome-ignore lint/suspicious/noConsole: the dependency output being captured
     console.log('dropped line')
     await session.quit()

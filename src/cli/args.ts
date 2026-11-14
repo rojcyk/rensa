@@ -2,7 +2,6 @@ import { PROVIDERS, type Provider, type RunInput } from '../engine/index.js'
 
 export const USAGE = `usage:
   rensa [<chain>]                           open the TUI, on the chain if given
-        [--fullscreen | --inline]           full window (default), or in the scrollback
   rensa run <chain> [input text]            run a chain with no UI
         [--input-file <path>]               read the input from a file
         [--base <ref>]                      override the chain's base ref
@@ -22,12 +21,10 @@ export interface RunArgs {
   output: OutputMode
 }
 
-/** `rensa [<chain>] [--fullscreen | --inline]`; a flag is present only when given. */
+/** `rensa [<chain>]`. */
 export interface TuiArgs {
   /** Opens on this chain's detail screen. */
   chain?: string
-  fullscreen?: true
-  inline?: true
 }
 
 export type Command =
@@ -73,11 +70,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   }
 }
 
-/** Anything that is not a command: an optional chain name and the mode flags. */
+/** Anything that is not a command: an optional chain name. */
 function parseTui(argv: readonly string[]): ParsedArgs {
   let chain: string | undefined
-  let fullscreen = false
-  let inline = false
   for (const arg of argv) {
     if (!arg.startsWith('-') || arg === '-') {
       if (chain !== undefined) return fail(`unexpected argument ${arg}`)
@@ -88,23 +83,11 @@ function parseTui(argv: readonly string[]): ParsedArgs {
       case '--help':
       case '-h':
         return ok({ kind: 'help' })
-      case '--fullscreen':
-        fullscreen = true
-        break
-      case '--inline':
-        inline = true
-        break
       default:
         return fail(`unknown flag ${splitFlag(arg)[0]}`)
     }
   }
-  if (fullscreen && inline) return fail('--fullscreen and --inline cannot be combined')
-  return ok({
-    kind: 'tui',
-    ...(chain !== undefined && { chain }),
-    ...(fullscreen && { fullscreen: true as const }),
-    ...(inline && { inline: true as const }),
-  })
+  return ok({ kind: 'tui', ...(chain !== undefined && { chain }) })
 }
 
 function parseRun(argv: readonly string[]): ParsedArgs {

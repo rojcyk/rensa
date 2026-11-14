@@ -17,7 +17,6 @@ import { agentStep, resolvedChain, shellStep } from '../../testing/steps.js'
 import type { Navigate } from '../app.js'
 import { Header } from '../components/Header.js'
 import { SizeProvider } from '../size.js'
-import type { Mode } from '../terminalSession.js'
 import { theme } from '../theme.js'
 import { Detail, type DetailEngine } from './Detail.js'
 
@@ -267,9 +266,6 @@ function applySgr(bg: string | undefined, params: string): string | undefined {
   return next
 }
 
-/** Any SGR background escape, truecolor or 256-color. */
-const ANY_BG = '\x1b[48;'
-
 function bgOf(hex: string): string {
   const n = Number.parseInt(hex.slice(1), 16)
   return `48;2;${(n >> 16) & 0xff};${(n >> 8) & 0xff};${n & 0xff}`
@@ -295,13 +291,11 @@ function mount(opts: {
   chain: string
   columns?: number
   rows?: number
-  mode?: Mode
   active?: boolean
 }): Screen {
   const { engine, chain } = opts
   const columns = opts.columns ?? 74
   const rows = opts.rows ?? 30
-  const mode = opts.mode ?? 'inline'
   const navigate = vi.fn<Navigate>()
   const requestQuit = vi.fn<() => void>()
   const detail = (
@@ -311,7 +305,6 @@ function mount(opts: {
       navigate={navigate}
       requestQuit={requestQuit}
       active={opts.active ?? true}
-      mode={mode}
       header={
         <Header
           branch="feat/quote-limits"
@@ -322,21 +315,12 @@ function mount(opts: {
       }
     />
   )
-  // What app.tsx does: the fullscreen root alone carries theme.background.
+  // What app.tsx does: the full-window root alone carries theme.background.
   const tree = (
     <SizeProvider columns={columns} rows={rows}>
-      {mode === 'fullscreen' ? (
-        <Box
-          width={columns}
-          height={rows}
-          flexDirection="column"
-          backgroundColor={theme.background}
-        >
-          {detail}
-        </Box>
-      ) : (
-        detail
-      )}
+      <Box width={columns} height={rows} flexDirection="column" backgroundColor={theme.background}>
+        {detail}
+      </Box>
     </SizeProvider>
   )
   const v = renderFrames(tree, { columns, rows })
@@ -416,8 +400,12 @@ function promptRow(lines: string[]): number {
 }
 
 describe('the frame of a chain with a text input', () => {
-  it('matches the plan mock when the tdd-review chain is shown on a clean tree', async () => {
-    const s = await mounted({ engine: new StubEngine(root, [TDD_REVIEW]), chain: 'tdd-review' })
+  it('matches the plan mock when the tdd-review chain is shown on a clean tree at 74x25', async () => {
+    const s = await mounted({
+      engine: new StubEngine(root, [TDD_REVIEW]),
+      chain: 'tdd-review',
+      rows: MOCK_FRAME.length,
+    })
 
     expect(s.lines()).toEqual(MOCK_FRAME)
   })
@@ -832,33 +820,29 @@ describe('layout at the terminal size', () => {
     { description: 'Twenty checks in a row.', input: 'text' },
   )
 
-  it.each<Mode>(['fullscreen', 'inline'])(
-    'keeps the input box on the last rows and clips the timeline when the steps do not fit at 100x30 (%s)',
-    async (mode) => {
-      const s = await mounted({
-        engine: new StubEngine(root, [LONG_CHAIN]),
-        chain: 'long-chain',
-        columns: 100,
-        rows: 30,
-        mode,
-      })
+  it('keeps the input box on the last rows and clips the timeline when the steps do not fit at 100x30', async () => {
+    const s = await mounted({
+      engine: new StubEngine(root, [LONG_CHAIN]),
+      chain: 'long-chain',
+      columns: 100,
+      rows: 30,
+    })
 
-      const lines = s.lines()
-      const stepRows = lines.filter((l) => /^ {2}○ check-\d+ /.test(l))
-      const shownIds = stepRows.map((l) => l.trim().split(/\s+/)[1])
-      expect(lines).toHaveLength(30)
-      expect(lines.slice(-3).map((l) => l[0])).toEqual(['╭', '│', '╰'])
-      expect(lines[27]).toMatch(/^╭─+╮$/)
-      expect(lines[28]).toMatch(/^│ › +│$/)
-      expect(lines).toContain('  working tree clean')
-      expect(lines.indexOf('  working tree clean')).toBeGreaterThan(
-        lines.indexOf(stepRows.at(-1) ?? ''),
-      )
-      expect(shownIds).toEqual(Array.from({ length: shownIds.length }, (_, i) => `check-${i + 1}`))
-      expect(shownIds.length).toBeGreaterThan(0)
-      expect(shownIds.length).toBeLessThan(20)
-    },
-  )
+    const lines = s.lines()
+    const stepRows = lines.filter((l) => /^ {2}○ check-\d+ /.test(l))
+    const shownIds = stepRows.map((l) => l.trim().split(/\s+/)[1])
+    expect(lines).toHaveLength(30)
+    expect(lines.slice(-3).map((l) => l[0])).toEqual(['╭', '│', '╰'])
+    expect(lines[27]).toMatch(/^╭─+╮$/)
+    expect(lines[28]).toMatch(/^│ › +│$/)
+    expect(lines).toContain('  working tree clean')
+    expect(lines.indexOf('  working tree clean')).toBeGreaterThan(
+      lines.indexOf(stepRows.at(-1) ?? ''),
+    )
+    expect(shownIds).toEqual(Array.from({ length: shownIds.length }, (_, i) => `check-${i + 1}`))
+    expect(shownIds.length).toBeGreaterThan(0)
+    expect(shownIds.length).toBeLessThan(20)
+  })
 
   it('truncates the description and a long step detail with … when narrow at 50 columns', async () => {
     const chain = resolvedChain(
@@ -888,7 +872,6 @@ describe('layout at the terminal size', () => {
       chain: 'tdd-review',
       columns: 60,
       rows: 8,
-      mode: 'fullscreen',
     })
 
     await s.type('fix the flaky test')
@@ -920,11 +903,10 @@ describe('painting', () => {
     }
   }
 
-  it('paints the focused box interior with theme.selection and its border with the root background in fullscreen', async () => {
+  it('paints the focused box interior with theme.selection and its border with the root background when the input box is focused', async () => {
     const s = await mounted({
       engine: new StubEngine(root, [TDD_REVIEW]),
       chain: 'tdd-review',
-      mode: 'fullscreen',
     })
     await s.type('fix')
     await effects()
@@ -941,32 +923,30 @@ describe('painting', () => {
     expect(border.filter((c) => c.bg !== ROOT_BG)).toEqual([])
   })
 
-  it('paints no background anywhere but the focused box interior in inline mode', async () => {
+  it('paints every cell outside the focused box interior with the root background, chain box borders included', async () => {
     const s = await mounted({
       engine: new StubEngine(root, [TDD_REVIEW]),
       chain: 'tdd-review',
-      mode: 'inline',
     })
     await s.type('fix')
     await effects()
 
     const raw = s.raw()
-    const { interior } = inputBox(raw)
-    const elsewhere = [...raw.slice(0, -3).flatMap(cellsOf), ...inputBox(raw).border].filter(
-      (c) => c.bg !== undefined,
-    )
+    const elsewhere = [...raw.slice(0, -3).flatMap(cellsOf), ...inputBox(raw).border]
 
-    expect(interior.filter((c) => c.bg !== SELECTION_BG)).toEqual([])
-    expect(elsewhere).toEqual([])
+    expect(raw).toHaveLength(30)
+    expect(elsewhere.filter((c) => c.bg !== ROOT_BG)).toEqual([])
   })
 
-  it('paints no background at all in inline mode when the chain has no input box', async () => {
+  it('paints every cell with the root background when the chain has no input box', async () => {
     const s = await mounted({
       engine: new StubEngine(root, [NIGHTLY_AUDIT], { ok: true }),
       chain: 'nightly-audit',
-      mode: 'inline',
     })
 
-    expect(s.view.lastFrame()).not.toContain(ANY_BG)
+    const raw = s.raw()
+
+    expect(raw).toHaveLength(30)
+    expect(raw.flatMap(cellsOf).filter((c) => c.bg !== ROOT_BG)).toEqual([])
   })
 })

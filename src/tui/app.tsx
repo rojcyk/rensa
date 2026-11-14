@@ -12,7 +12,6 @@ import { Run } from './screens/Run.js'
 import { SizeProvider } from './size.js'
 import {
   createTeardown,
-  type Mode,
   type Session,
   SessionContext,
   type SessionControls,
@@ -20,8 +19,8 @@ import {
 } from './terminalSession.js'
 import { theme } from './theme.js'
 
-export type { Mode, Session } from './terminalSession.js'
-export { resolveMode, UsageError } from './terminalSession.js'
+export type { Session } from './terminalSession.js'
+export { terminalProblem } from './terminalSession.js'
 
 export type Screen =
   | { name: 'chains' }
@@ -34,7 +33,7 @@ export type Navigate = (screen: Screen) => void
  * Starts the TUI: registers the terminal restore, then renders. The only
  * entry point into `src/tui/`, loaded by `main.ts` through a dynamic import.
  */
-export function start(engine: Engine, screen: Screen, mode: Mode): Session {
+export function start(engine: Engine, screen: Screen): Session {
   const teardown = createTeardown()
   let session: Session | undefined
   // Components only quit from key handlers, after `startSession` returned.
@@ -43,27 +42,22 @@ export function start(engine: Engine, screen: Screen, mode: Mode): Session {
     onTeardown: teardown.add,
   }
   session = startSession(
-    mode,
     <SessionContext value={controls}>
-      <App engine={engine} initial={screen} mode={mode} />
+      <App engine={engine} initial={screen} />
     </SessionContext>,
     teardown,
   )
   return session
 }
 
-function App(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNode {
+function App(props: { engine: Engine; initial: Screen }): ReactNode {
   const { columns, rows } = useWindowSize()
-  const content = (
-    <SizeProvider columns={columns} rows={rows}>
-      <Router {...props} />
-      <CrashProbe />
-    </SizeProvider>
-  )
-  if (props.mode !== 'fullscreen') return content
   return (
     <Box width={columns} height={rows} flexDirection="column" backgroundColor={theme.background}>
-      {content}
+      <SizeProvider columns={columns} rows={rows}>
+        <Router {...props} />
+        <CrashProbe />
+      </SizeProvider>
     </Box>
   )
 }
@@ -77,8 +71,8 @@ const QUIT_OVERLAY_ROWS = 1
  * Screen state, the live run handles, and the quit confirmation. While
  * the overlay shows it holds the only active `useKeys`.
  */
-function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNode {
-  const { engine, initial, mode } = props
+function Router(props: { engine: Engine; initial: Screen }): ReactNode {
+  const { engine, initial } = props
   const { quit } = useContext(SessionContext)
   const [screen, setScreen] = useState<Screen>(initial)
   // Every run started or opened this session; a run keeps going when its screen is left.
@@ -135,7 +129,6 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
         navigate={navigate}
         requestQuit={requestQuit}
         active={overlay === undefined}
-        mode={mode}
         header={headerProps}
         {...footerOverlay}
       />
@@ -152,7 +145,6 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
         navigate={navigate}
         requestQuit={requestQuit}
         active={overlay === undefined}
-        mode={mode}
         header={header}
         {...footerOverlay}
       />
@@ -161,7 +153,6 @@ function Router(props: { engine: Engine; initial: Screen; mode: Mode }): ReactNo
 
   return (
     <Layout
-      mode={mode}
       header={header}
       headerRows={HEADER_ROWS}
       body={

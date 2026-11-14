@@ -62,19 +62,15 @@ async function runTui(args: TuiArgs): Promise<never> {
   }
   const [engine, tui] = loaded
 
-  let mode: ReturnType<typeof tui.resolveMode>
-  try {
-    mode = tui.resolveMode(args, process.env)
-  } catch (err) {
-    if (!(err instanceof tui.UsageError)) throw err
-    writeLines(process.stderr, [`rensa: ${err.message}`, USAGE])
+  const problem = tui.terminalProblem()
+  if (problem !== undefined) {
+    writeLines(process.stderr, [`rensa: ${problem}`])
     return exitTui(EXIT_USAGE)
   }
 
   const session = tui.start(
     engine,
     args.chain !== undefined ? { name: 'detail', chain: args.chain } : { name: 'chains' },
-    mode,
   )
   try {
     await session.done

@@ -20,7 +20,6 @@ import { Timeline } from '../components/Timeline.js'
 import { type Focus, useKeys } from '../hooks/useKeys.js'
 import { isShort } from '../layout.js'
 import { useBudget, useSize } from '../size.js'
-import type { Mode } from '../terminalSession.js'
 import { theme } from '../theme.js'
 
 /** The part of the engine this screen uses; a stub needs only these. */
@@ -38,7 +37,6 @@ export interface DetailProps {
   requestQuit(): void
   /** False while an app-level overlay holds the keys. */
   active: boolean
-  mode: Mode
   /** The app's header; this screen lays out through `Layout` itself. */
   header: ReactNode
   /** The app's quit overlay; takes the footer in place of the input area while it shows. */
@@ -71,7 +69,7 @@ interface StatusLine {
  * goes back to chains. A chain that failed to load shows only its error.
  */
 export function Detail(props: DetailProps): ReactNode {
-  const { engine, chain: name, navigate, requestQuit, active, mode, header, overlay } = props
+  const { engine, chain: name, navigate, requestQuit, active, header, overlay } = props
   const [loaded] = useState(() => load(engine, name))
   const chain = 'chain' in loaded ? loaded.chain : undefined
   const { check, refresh, checkNow } = useLaunchCheck(engine, name, chain !== undefined)
@@ -160,7 +158,6 @@ export function Detail(props: DetailProps): ReactNode {
   const { columns, rows } = useSize()
   // A short terminal collapses the footer to one row, where a frame would show only its top border.
   const inputVariant = isShort(rows) ? 'line' : 'frame'
-  const borderBackground = mode === 'fullscreen' ? { borderBackgroundColor: theme.background } : {}
   let footer: ReactNode
   let footerRows: number
   if (overlay !== undefined) {
@@ -180,7 +177,7 @@ export function Detail(props: DetailProps): ReactNode {
         enabled
         width={columns}
         variant={inputVariant}
-        {...borderBackground}
+        borderBackgroundColor={theme.background}
       />
     )
     footerRows = INPUT_ROWS[inputVariant]
@@ -198,7 +195,6 @@ export function Detail(props: DetailProps): ReactNode {
 
   return (
     <Layout
-      mode={mode}
       header={header}
       headerRows={HEADER_ROWS}
       body={
@@ -208,7 +204,7 @@ export function Detail(props: DetailProps): ReactNode {
             name={name}
             loaded={loaded}
             width={columns}
-            {...borderBackground}
+            borderBackgroundColor={theme.background}
           />
           {chain !== undefined && (
             <>

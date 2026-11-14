@@ -1,6 +1,6 @@
-// Hex only. `background` goes on the fullscreen root Box and nowhere else;
-// inline mode paints no root background; explicit backgrounds only on
-// selected rows or panels (step 14, rule D).
+// Hex only. `background` goes on the full-window root Box and on border
+// cells that must match it; explicit backgrounds only on selected rows or
+// panels (step 14, rule D).
 export const theme = {
   /** Primary copy. */
   text: '#e6e6e6',
@@ -15,7 +15,7 @@ export const theme = {
   ok: '#7fb77e',
   err: '#d47a7a',
   warn: '#d9b86a',
-  /** Fullscreen root only. */
+  /** The full-window root fill. */
   background: '#121212',
   /** Background of the selected row or panel. */
   selection: '#2a2a2a',

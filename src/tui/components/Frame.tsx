@@ -12,7 +12,7 @@ export interface FrameProps {
   backgroundColor?: string
   /**
    * Behind the border cells, which `backgroundColor` excludes: the root's
-   * `theme.background` in fullscreen, so the border matches the fill.
+   * `theme.background`, so the border matches the fill.
    */
   borderBackgroundColor?: string
 }

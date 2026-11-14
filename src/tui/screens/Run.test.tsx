@@ -31,7 +31,6 @@ import type { HeaderProps } from '../components/Header.js'
 import { FRAME_MS } from '../frameRate.js'
 import type { KeyHandler } from '../hooks/useKeys.js'
 import { SizeProvider } from '../size.js'
-import type { Mode } from '../terminalSession.js'
 import { theme } from '../theme.js'
 import { Run, type RunScreenSource } from './Run.js'
 
@@ -116,8 +115,6 @@ function bgOf(hex: string): string {
 }
 const SELECTION_BG = bgOf(theme.selection)
 const ROOT_BG = bgOf(theme.background)
-/** Any SGR background escape, truecolor or 256-color. */
-const ANY_BG = '\x1b[48;'
 
 interface Cell {
   char: string
@@ -338,13 +335,7 @@ interface Screen {
   resize(columns: number, rows: number): void
 }
 
-function mount(opts: {
-  source: RunScreenSource
-  columns?: number
-  rows?: number
-  mode?: Mode
-}): Screen {
-  const mode = opts.mode ?? 'inline'
+function mount(opts: { source: RunScreenSource; columns?: number; rows?: number }): Screen {
   const navigate = vi.fn<Navigate>()
   const requestQuit = vi.fn<() => void>()
   const tree = (columns: number, rows: number) => {
@@ -354,25 +345,20 @@ function mount(opts: {
         navigate={navigate}
         requestQuit={requestQuit}
         active={true}
-        mode={mode}
         header={HEADER}
       />
     )
-    // What app.tsx does: the fullscreen root alone carries theme.background.
+    // What app.tsx does: the full-window root alone carries theme.background.
     return (
       <SizeProvider columns={columns} rows={rows}>
-        {mode === 'fullscreen' ? (
-          <Box
-            width={columns}
-            height={rows}
-            flexDirection="column"
-            backgroundColor={theme.background}
-          >
-            {screen}
-          </Box>
-        ) : (
-          screen
-        )}
+        <Box
+          width={columns}
+          height={rows}
+          flexDirection="column"
+          backgroundColor={theme.background}
+        >
+          {screen}
+        </Box>
       </SizeProvider>
     )
   }
@@ -421,10 +407,7 @@ function pauseEmits(run: ScriptedRun, step: string): void {
   )
 }
 
-function mountLive(
-  run: ScriptedRun,
-  opts: { columns?: number; rows?: number; mode?: Mode } = {},
-): Screen {
+function mountLive(run: ScriptedRun, opts: { columns?: number; rows?: number } = {}): Screen {
   return mount({ source: { handle: run.handle, chain: TDD_REVIEW }, ...opts })
 }
 
@@ -786,7 +769,7 @@ describe('keys on the run screen', () => {
       kind: 'text',
       text: `Line ${String(i).padStart(2, '0')} of the limiter notes`,
     }))
-    const s = mountLive(live(TO_IMPLEMENT, records), { mode: 'fullscreen' })
+    const s = mountLive(live(TO_IMPLEMENT, records))
     await effects()
     const firstShown = () =>
       s
@@ -1052,8 +1035,8 @@ describe('painting', () => {
   /** The rows of the body: between the header slot (4) and the note box (3). */
   const bodyRows = (s: Screen) => s.raw().slice(4, -3)
 
-  it('paints the selected step row with the selection background on every cell to the column edge in fullscreen', async () => {
-    const s = mountLive(live(TO_IMPLEMENT), { mode: 'fullscreen' })
+  it('paints the selected step row with the selection background on every cell to the column edge', async () => {
+    const s = mountLive(live(TO_IMPLEMENT))
     await effects()
 
     const row = bodyRows(s).find((r) => stripVTControlCharacters(r).includes('● implement'))
@@ -1063,8 +1046,8 @@ describe('painting', () => {
     expect(cells.filter((c) => c.bg !== SELECTION_BG)).toEqual([])
   })
 
-  it('fills empty transcript cells and the gap beside the separator with the root background in fullscreen', async () => {
-    const s = mountLive(live(TO_IMPLEMENT, []), { mode: 'fullscreen' })
+  it('fills empty transcript cells and the gap beside the separator with the root background', async () => {
+    const s = mountLive(live(TO_IMPLEMENT, []))
     await effects()
 
     const rows = bodyRows(s).map(cellsOf)
@@ -1076,8 +1059,8 @@ describe('painting', () => {
     expect(gap.flat().filter((c) => c.bg !== ROOT_BG)).toEqual([])
   })
 
-  it('draws the separator cell on the root background in fullscreen', async () => {
-    const s = mountLive(live(TO_IMPLEMENT, []), { mode: 'fullscreen' })
+  it('draws the separator cell on the root background', async () => {
+    const s = mountLive(live(TO_IMPLEMENT, []))
     await effects()
 
     const separators = bodyRows(s).map((r) => cellsOf(r)[LEFT_COLS])
@@ -1089,7 +1072,7 @@ describe('painting', () => {
   it('leaves no stale cells when `paused before implement` is replaced by `running`', async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: NOW })
     const run = live(PAUSED_BEFORE, [])
-    const s = mountLive(run, { mode: 'fullscreen' })
+    const s = mountLive(run)
     await effects()
     expect(statusRow(s)).toMatch(/paused before implement$/)
 
@@ -1103,7 +1086,7 @@ describe('painting', () => {
   })
 
   it('moves the selection background with the selection when left is pressed', async () => {
-    const s = mountLive(live(TO_IMPLEMENT), { mode: 'fullscreen' })
+    const s = mountLive(live(TO_IMPLEMENT))
     await effects()
 
     await s.press(KEYS.left)
@@ -1121,7 +1104,7 @@ describe('painting', () => {
   })
 
   it('fills the new area with the root background after the terminal grows', async () => {
-    const s = mountLive(live(TO_IMPLEMENT), { mode: 'fullscreen' })
+    const s = mountLive(live(TO_IMPLEMENT))
     await effects()
 
     s.resize(120, 40)
@@ -1141,17 +1124,15 @@ describe('painting', () => {
     expect((body.at(-1) ?? []).slice(LEFT_COLS + 1).filter((c) => c.bg !== ROOT_BG)).toEqual([])
   })
 
-  it('paints no background in inline mode except on the selected step row', async () => {
-    const s = mountLive(live(TO_IMPLEMENT), { mode: 'inline' })
+  it('draws the note box border on the root background when the run is live', async () => {
+    const s = mountLive(live(TO_IMPLEMENT))
     await effects()
 
-    const raw = s.raw()
-    const selected = raw.filter((r) => stripVTControlCharacters(r).includes('● implement'))
-    const others = raw.filter((r) => !stripVTControlCharacters(r).includes('● implement'))
+    const [top = [], middle = [], bottom = []] = s.raw().slice(-3).map(cellsOf)
+    const border = [...top, middle[0], middle.at(-1), ...bottom]
 
-    expect(selected.length).toBe(1)
-    expect(selected[0]).toContain(ANY_BG)
-    expect(others.filter((r) => r.includes(ANY_BG))).toEqual([])
+    expect(stripVTControlCharacters(s.raw().at(-3) ?? '')).toMatch(/^╭─+╮$/)
+    expect(border.filter((c) => c?.bg !== ROOT_BG)).toEqual([])
   })
 })
 

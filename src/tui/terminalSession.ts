@@ -5,15 +5,11 @@ import { createContext, type ReactElement } from 'react'
 import { onDiag, onShutdown } from '../engine/index.js'
 import { MAX_FPS } from './frameRate.js'
 
-// The terminal session: mode resolution, Ink's render options, normal
-// quit and the fatal restore. The restore's writes and the fullscreen
-// resize erase below are the only sanctioned uses of process.stdout under
-// src/tui/; nothing else in the TUI writes to the terminal except Ink.
-
-export type Mode = 'inline' | 'fullscreen'
-
-/** The one place the default lives: the alternate screen, full window. */
-const DEFAULT_MODE: Mode = 'fullscreen'
+// The terminal session: the terminal check, Ink's render options, normal
+// quit and the fatal restore. The TUI always draws the full window on the
+// alternate screen. The restore's writes and the resize erase below are
+// the only sanctioned uses of process.stdout under src/tui/; nothing else
+// in the TUI writes to the terminal except Ink.
 
 const LEAVE_ALTERNATE_SCREEN = '\x1b[?1049l'
 const SHOW_CURSOR = '\x1b[?25h'
@@ -21,32 +17,20 @@ const RESET_ATTRIBUTES = '\x1b[0m'
 /** Cursor to the top-left cell, then erase to the end of the screen. */
 const HOME_AND_ERASE_DOWN = '\x1b[H\x1b[J'
 
-/** A command-line misuse; the CLI exits 64. */
-export class UsageError extends Error {
-  override name = 'UsageError'
-}
-
 /**
- * The session mode, resolved once at startup: fullscreen unless
- * `--inline`. Not a terminal on stdout means inline whatever the flags say;
- * not a terminal on stdin means inline unless `--fullscreen`.
+ * Why the TUI cannot start here, or undefined when it can. It needs a
+ * terminal on stdout to draw the full window, and one on stdin for the
+ * keys: without them Ink would unmount on its own and the alternate
+ * screen would take the output with it.
  */
-export function resolveMode(
-  flags: { fullscreen?: boolean; inline?: boolean },
-  _env: NodeJS.ProcessEnv,
+export function terminalProblem(
   stdoutIsTTY: boolean = Boolean(process.stdout.isTTY),
   stdinIsTTY: boolean = Boolean(process.stdin.isTTY),
-): Mode {
-  if (flags.fullscreen && flags.inline) {
-    throw new UsageError('--fullscreen and --inline cannot be combined')
-  }
-  if (!stdoutIsTTY) return 'inline'
-  if (flags.fullscreen) return 'fullscreen'
-  if (flags.inline) return 'inline'
-  // No keyboard to quit with: Ink unmounts on its own and the alternate
-  // screen would take the output with it.
-  if (!stdinIsTTY) return 'inline'
-  return DEFAULT_MODE
+): string | undefined {
+  if (stdoutIsTTY && stdinIsTTY) return undefined
+  const missing =
+    !stdoutIsTTY && !stdinIsTTY ? 'stdin and stdout' : stdoutIsTTY ? 'stdin' : 'stdout'
+  return `the TUI needs a terminal on ${missing}; use \`rensa run <chain>\` to run a chain with no UI`
 }
 
 /** Cleanup callbacks the UI owns: engine subscriptions, batchers, intervals. */
@@ -129,11 +113,7 @@ interface Ownership {
  * the engine's shutdown registry before anything else, so a throw from
  * `render` itself still leaves a sane terminal on exit.
  */
-export function startSession(
-  mode: Mode,
-  app: ReactElement,
-  teardown: Teardown = createTeardown(),
-): Session {
+export function startSession(app: ReactElement, teardown: Teardown = createTeardown()): Session {
   const owned: Ownership = {
     alternateScreen: false,
     cursorHidden: false,
@@ -167,14 +147,17 @@ export function startSession(
 
   const { stdout, stdin } = process
   // Ink enters the alternate screen and hides the cursor in its
-  // constructor, under exactly this condition, before anything that can throw.
-  const entersAlternateScreen = mode === 'fullscreen' && Boolean(stdout.isTTY) && !inCi()
+  // constructor, under exactly this condition, before anything that can
+  // throw. `interactive: true` keeps Ink from switching to its CI mode,
+  // which draws only the last frame, when a terminal has CI set.
+  const entersAlternateScreen = Boolean(stdout.isTTY)
   owned.alternateScreen = entersAlternateScreen
   owned.cursorHidden = entersAlternateScreen
 
   stopCapture = captureForeignOutput(captured)
   instance = render(app, {
-    alternateScreen: mode === 'fullscreen',
+    alternateScreen: true,
+    interactive: true,
     incrementalRendering: true,
     maxFps: MAX_FPS,
     exitOnCtrlC: false,
@@ -352,10 +335,4 @@ function captureForeignOutput(lines: string[]): () => void {
     for (const listener of warningListeners) process.on('warning', listener)
     stopDiag()
   }
-}
-
-/** Ink's CI detection (`is-in-ci`), read at call time. */
-function inCi(env: NodeJS.ProcessEnv = process.env): boolean {
-  const set = (key: string) => key in env && env[key] !== '0' && env[key] !== 'false'
-  return set('CI') || set('CONTINUOUS_INTEGRATION')
 }

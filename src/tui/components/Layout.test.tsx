@@ -5,7 +5,6 @@ import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type Frames, renderFrames } from '../../testing/inkFrames.js'
 import { layoutBudget } from '../layout.js'
 import { SizeProvider, useBudget, useSize } from '../size.js'
-import type { Mode } from '../terminalSession.js'
 import { Layout, type LayoutProps } from './Layout.js'
 
 let view: Frames | undefined
@@ -61,14 +60,12 @@ const HEADER = <Lines lines={['⎇ feat/quote-limits  ~/Repos/trezor-suite', 'he
 const FOOTER = <Lines lines={['footer: esc back  ctrl+c quit', 'footer second row']} />
 
 function layoutAt(
-  mode: Mode,
   size: { columns: number; rows: number },
   props: Partial<LayoutProps> = {},
 ): Frames {
   view = renderFrames(
     <Root>
       <Layout
-        mode={mode}
         header={HEADER}
         headerRows={2}
         body={<Lines lines={Array.from({ length: 60 }, (_, i) => `body row ${i + 1}`)} />}
@@ -87,44 +84,22 @@ describe('row budgets at different terminal sizes', () => {
     ['normal', 120, 40],
     ['narrow', 50, 24],
     ['very short', 80, 6],
-  ])(
-    'fills exactly the rows in fullscreen when the terminal is %s (%ix%i)',
-    async (_, columns, rows) => {
-      const v = layoutAt('fullscreen', { columns, rows })
-      await effects()
-
-      expect(linesOf(v.lastFrame())).toHaveLength(rows)
-    },
-  )
-
-  it.each([
-    ['normal', 120, 40],
-    ['narrow', 50, 24],
-    ['very short', 80, 6],
-  ])(
-    'takes at most the rows inline when the body is longer than the terminal is %s (%ix%i)',
-    async (_, columns, rows) => {
-      const v = layoutAt('inline', { columns, rows })
-      await effects()
-
-      expect(linesOf(v.lastFrame()).length).toBeLessThanOrEqual(rows)
-    },
-  )
-
-  it('takes only the rows it needs inline when the content is shorter than the terminal', async () => {
-    const v = layoutAt(
-      'inline',
-      { columns: 120, rows: 40 },
-      { body: <Lines lines={['one body row']} /> },
-    )
+  ])('fills exactly the rows when the terminal is %s (%ix%i)', async (_, columns, rows) => {
+    const v = layoutAt({ columns, rows })
     await effects()
 
-    expect(linesOf(v.lastFrame())).toHaveLength(5)
+    expect(linesOf(v.lastFrame())).toHaveLength(rows)
   })
 
-  it('puts the header in its two rows and the footer in its last two rows in fullscreen at 120x40', async () => {
+  it('still fills exactly the 40 rows when the body has one row at 120x40', async () => {
+    const v = layoutAt({ columns: 120, rows: 40 }, { body: <Lines lines={['one body row']} /> })
+    await effects()
+
+    expect(linesOf(v.lastFrame())).toHaveLength(40)
+  })
+
+  it('puts the header in its two rows and the footer in its last two rows at 120x40', async () => {
     const v = layoutAt(
-      'fullscreen',
       { columns: 120, rows: 40 },
       {
         body: <Lines lines={['body row 1', 'body row 2']} />,
@@ -144,7 +119,6 @@ describe('row budgets at different terminal sizes', () => {
 
   it('collapses header and footer to one row each and gives the body the other six when short at 80x8', async () => {
     const v = layoutAt(
-      'fullscreen',
       { columns: 80, rows: 8 },
       {
         header: <Text>{'⎇ feat/quote-limits  ~/Repos/trezor-suite'}</Text>,
@@ -170,7 +144,7 @@ describe('row budgets at different terminal sizes', () => {
 
 describe('clipping content taller than its slot', () => {
   it('shows the first 36 body rows and then the footer when the body has 60 rows at 120x40', async () => {
-    const v = layoutAt('fullscreen', { columns: 120, rows: 40 })
+    const v = layoutAt({ columns: 120, rows: 40 })
     await effects()
 
     const lines = linesOf(v.lastFrame()).map((l) => l.trimEnd())
@@ -183,7 +157,6 @@ describe('clipping content taller than its slot', () => {
 
   it('shows the first two header lines and the first body row when the header has three lines and a budget of two', async () => {
     const v = layoutAt(
-      'fullscreen',
       { columns: 120, rows: 40 },
       {
         header: <Lines lines={['header one', 'header two', 'header three']} />,
@@ -198,7 +171,6 @@ describe('clipping content taller than its slot', () => {
 
   it('shows only the first header line and the first footer line when short collapses two-line slots to one row at 80x8', async () => {
     const v = layoutAt(
-      'fullscreen',
       { columns: 80, rows: 8 },
       {
         body: <Lines lines={['body row 1']} />,
@@ -217,7 +189,6 @@ describe('clipping content taller than its slot', () => {
 describe('the status-only body in short mode', () => {
   it('shows only the status line in the body when short leaves fewer than 3 body rows', async () => {
     const v = layoutAt(
-      'fullscreen',
       { columns: 80, rows: 4 },
       {
         header: <Text>{'⎇ feat/quote-limits  ~/Repos/trezor-suite'}</Text>,
@@ -238,7 +209,6 @@ describe('the status-only body in short mode', () => {
 
   it('shows the body, not the status line, when short leaves 3 body rows', async () => {
     const v = layoutAt(
-      'fullscreen',
       { columns: 80, rows: 5 },
       {
         header: <Text>{'⎇ feat/quote-limits  ~/Repos/trezor-suite'}</Text>,
@@ -260,7 +230,6 @@ describe('two-column body', () => {
   it('truncates a step id longer than the left budget with … and keeps the right column at its width', async () => {
     const columns = 120
     const v = layoutAt(
-      'fullscreen',
       { columns, rows: 20 },
       {
         split: {
@@ -291,7 +260,6 @@ describe('two-column body', () => {
   it('gives the body a content width of transcriptCols when split at 100 columns', async () => {
     const columns = 100
     const v = layoutAt(
-      'fullscreen',
       { columns, rows: 20 },
       {
         split: { left: <Text>implement</Text>, leftIdWidth: 9 },
@@ -315,7 +283,6 @@ describe('two-column body', () => {
   it('drops the left column, shows the strip, and gives the body a content width of transcriptCols when narrow at 50 columns', async () => {
     const columns = 50
     const v = layoutAt(
-      'fullscreen',
       { columns, rows: 20 },
       {
         split: {
@@ -401,7 +368,6 @@ describe('a live resize of a two-column body', () => {
     view = renderFrames(
       <Root>
         <Layout
-          mode="fullscreen"
           header={<Lines lines={['⎇ main  ~/Repos/rensa', 'rule']} />}
           headerRows={2}
           split={{ left: <Text wrap="truncate-end">{'a'.repeat(30)}</Text>, leftIdWidth: 30 }}

@@ -102,7 +102,6 @@ shell command in the repository root and captures its output.
 
 ```text
 rensa [<chain>]                           open the TUI, on the chain if given
-      [--fullscreen | --inline]           full window (default), or in the scrollback
 rensa run <chain> [input text]            run a chain with no UI
       [--input-file <path>]               read the input from a file
       [--base <ref>]                      override the chain's base ref

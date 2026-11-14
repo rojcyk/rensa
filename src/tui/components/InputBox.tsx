@@ -36,7 +36,7 @@ export interface InputBoxProps {
   focused: boolean
   enabled: boolean
   width: number
-  /** Behind the border; `theme.background` in fullscreen (see `Frame`). */
+  /** Behind the border; the screens pass `theme.background` (see `Frame`). */
   borderBackgroundColor?: string
   /**
    * `frame` (default): three rows, the text inside a rounded border.

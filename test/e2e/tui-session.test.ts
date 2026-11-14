@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process'
 import { accessSync, chmodSync, constants, existsSync } from 'node:fs'
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { type IPty, spawn as spawnPty } from 'node-pty'
 import { afterEach, assert, beforeAll, describe, expect, it, vi } from 'vitest'
 import { commitAll, installChains } from '../../src/testing/chains.js'
-import { builtCli, cliEnv } from '../../src/testing/cli.js'
+import { builtCli, cliEnv, runCli } from '../../src/testing/cli.js'
 import { processesWithArgs } from '../../src/testing/processes.js'
 import { type TmpDir, tmpDir, tmpRepo } from '../../src/testing/tmpRepo.js'
 
@@ -32,9 +32,10 @@ const CRASH_CONSOLE = 'rensa-crash-probe console'
 /** What a provider-check shim sleeps for; unlikely enough to find by its command line. */
 const SLOW_CHECK_ARGS = 'sleep 30.6789'
 
-type Mode = 'inline' | 'fullscreen'
-const MODES: Mode[] = ['inline', 'fullscreen']
-const modeArgs = (mode: Mode) => (mode === 'fullscreen' ? ['--fullscreen'] : ['--inline'])
+/** What `rensa` prints and exits with when the TUI has no terminal to draw on or read keys from. */
+const EXIT_USAGE = 64
+const noTerminalOn = (streams: string) =>
+  `rensa: the TUI needs a terminal on ${streams}; use \`rensa run <chain>\` to run a chain with no UI`
 
 let dirs: TmpDir[] = []
 
@@ -110,10 +111,14 @@ interface Pty {
   cliPid(): number
 }
 
-/** `sh -c '<cli> …; echo __EXIT__$?; stty -a; echo __DONE__'` in a 100x30 pseudo-terminal. */
-function startInPty(args: string[], cwd: string, env: NodeJS.ProcessEnv): Pty {
+/**
+ * `sh -c '<cli> … <redirect>; echo __EXIT__$?; stty -a; echo __DONE__'` in a
+ * 100x30 pseudo-terminal. `redirect` is shell redirection for rensa alone,
+ * e.g. `</dev/null`.
+ */
+function startInPty(args: string[], cwd: string, env: NodeJS.ProcessEnv, redirect = ''): Pty {
   const cli = [process.execPath, builtCli(), ...args].map(quote).join(' ')
-  const script = `${cli}; echo "${EXIT_MARK}$?${EXIT_MARK}"; stty -a; echo ${DONE_MARK}`
+  const script = `${cli} ${redirect}; echo "${EXIT_MARK}$?${EXIT_MARK}"; stty -a; echo ${DONE_MARK}`
   const term = spawnPty('/bin/sh', ['-c', script], {
     name: 'xterm-256color',
     cols: COLUMNS,
@@ -196,30 +201,33 @@ async function finish(pty: Pty, cliPid: number | undefined): Promise<Outcome> {
   }
 }
 
-/**
- * Starts rensa in a repository, waits for its first frame, then runs
- * `drive`. `args` replaces the mode's flag, for the no-flag default.
- */
-async function scenario(
-  mode: Mode,
-  drive: (pty: Pty) => Promise<void>,
-  opts: {
-    vars?: Record<string, string | undefined>
-    slowChecks?: boolean
-    args?: string[]
-  } = {},
-): Promise<Outcome> {
-  const { dir, home } = await repoWithChains()
-  const bin = await providerShims(opts.slowChecks ?? false)
-  const env = cliEnv(home, {
+/** The CLI environment for a scenario: provider shims first on PATH, CI unset unless `vars` sets it. */
+function scenarioEnv(
+  home: string,
+  bin: string,
+  vars: Record<string, string | undefined> = {},
+): NodeJS.ProcessEnv {
+  return cliEnv(home, {
     RENSA_DEV: '1',
     TERM: 'xterm-256color',
     CI: undefined,
     CONTINUOUS_INTEGRATION: undefined,
     PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    ...opts.vars,
+    ...vars,
   })
-  const pty = startInPty(opts.args ?? modeArgs(mode), dir, env)
+}
+
+/** Starts `rensa` with no arguments in a repository, waits for its first frame, then runs `drive`. */
+async function scenario(
+  drive: (pty: Pty) => Promise<void>,
+  opts: {
+    vars?: Record<string, string | undefined>
+    slowChecks?: boolean
+  } = {},
+): Promise<Outcome> {
+  const { dir, home } = await repoWithChains()
+  const bin = await providerShims(opts.slowChecks ?? false)
+  const pty = startInPty([], dir, scenarioEnv(home, bin, opts.vars))
   const firstFrame = await pty.waitFor(HEADER_GLYPH)
   // The branch fills in from an effect of the first commit, the same pass
   // in which Ink's useInput turns on raw mode: keys sent before it would
@@ -247,50 +255,44 @@ function isAlive(pid: number): boolean {
   }
 }
 
-/** The terminal state every ending must leave, whatever the mode. */
-function expectSaneTerminal(outcome: Outcome, mode: Mode): void {
+/** The terminal state every ending must leave. */
+function expectSaneTerminal(outcome: Outcome): void {
   const { stream, stty } = outcome
   expect({ echo: sttyFlag(stty, 'echo'), icanon: sttyFlag(stty, 'icanon') }).toEqual({
     echo: true,
     icanon: true,
   })
   expect(stream.lastIndexOf(SHOW_CURSOR)).toBeGreaterThan(stream.lastIndexOf(HEADER_GLYPH))
-  if (mode === 'fullscreen') {
-    expect({ enter: count(stream, ENTER_ALT), leave: count(stream, LEAVE_ALT) }).toEqual({
-      enter: 1,
-      leave: 1,
-    })
-    expect(stream.slice(stream.indexOf(LEAVE_ALT))).not.toContain(HEADER_GLYPH)
-  } else {
-    expect(stream).not.toContain(ENTER_ALT)
-    expect(stream.slice(stream.lastIndexOf(SHOW_CURSOR))).not.toContain(HEADER_GLYPH)
-  }
+  expect({ enter: count(stream, ENTER_ALT), leave: count(stream, LEAVE_ALT) }).toEqual({
+    enter: 1,
+    leave: 1,
+  })
+  expect(stream.slice(stream.indexOf(LEAVE_ALT))).not.toContain(HEADER_GLYPH)
   if (outcome.cliPid !== undefined) expect(isAlive(outcome.cliPid)).toBe(false)
 }
 
-describe.each(MODES)('a normal quit in %s mode', (mode) => {
+describe('a normal quit', () => {
   it('exits 0 and restores the terminal when esc is pressed on the chains screen', async () => {
-    const outcome = await scenario(mode, async (pty) => {
+    const outcome = await scenario(async (pty) => {
       pty.term.write('\x1b')
     })
 
     expect(outcome.exitCode).toBe(0)
-    expectSaneTerminal(outcome, mode)
+    expectSaneTerminal(outcome)
   })
 
   it('exits 0 and restores the terminal when ctrl+c is pressed with no run active', async () => {
-    const outcome = await scenario(mode, async (pty) => {
+    const outcome = await scenario(async (pty) => {
       pty.term.write('\x03')
     })
 
     expect(outcome.exitCode).toBe(0)
-    expectSaneTerminal(outcome, mode)
+    expectSaneTerminal(outcome)
   })
 
   it('exits promptly and leaves no provider-check process when quit while the check is still running', async () => {
     let quitAt = 0
     const outcome = await scenario(
-      mode,
       async (pty) => {
         await vi.waitFor(
           async () => expect(await processesWithArgs(SLOW_CHECK_ARGS)).not.toEqual([]),
@@ -307,28 +309,13 @@ describe.each(MODES)('a normal quit in %s mode', (mode) => {
     expect(outcome.exitCode).toBe(0)
     expect(quitTookMs).toBeLessThan(1_000)
     expect(await processesWithArgs(SLOW_CHECK_ARGS)).toEqual([])
-    expectSaneTerminal(outcome, mode)
+    expectSaneTerminal(outcome)
   })
 })
 
-describe('the default mode', () => {
-  it('enters the alternate screen once, leaves it on esc and exits 0 when rensa is started on a terminal with no mode flag', async () => {
-    const outcome = await scenario(
-      'fullscreen',
-      async (pty) => {
-        pty.term.write('\x1b')
-      },
-      { args: [] },
-    )
-
-    expect(outcome.exitCode).toBe(0)
-    expectSaneTerminal(outcome, 'fullscreen')
-  })
-})
-
-describe('resizing the terminal in fullscreen', () => {
+describe('resizing the terminal', () => {
   it('erases the screen from the top-left and draws the whole frame again when the pty gets wider', async () => {
-    const outcome = await scenario('fullscreen', async (pty) => {
+    const outcome = await scenario(async (pty) => {
       const resizedFrom = pty.output().length
       pty.term.resize(COLUMNS + 20, ROWS)
       // Each wait throws with the stream when its sequence never arrives.
@@ -338,33 +325,91 @@ describe('resizing the terminal in fullscreen', () => {
     })
 
     expect(outcome.exitCode).toBe(0)
-    expectSaneTerminal(outcome, 'fullscreen')
+    expectSaneTerminal(outcome)
   })
 })
 
-describe.each(MODES)('SIGTERM in %s mode', (mode) => {
+describe('a terminal with CI set', () => {
+  it('draws on the alternate screen, erases on resize and exits 0 on esc when CI=true', async () => {
+    const outcome = await scenario(
+      async (pty) => {
+        const resizedFrom = pty.output().length
+        pty.term.resize(COLUMNS + 20, ROWS)
+        const erasedAt = await pty.waitFor(HOME_AND_ERASE_DOWN, 5_000, resizedFrom)
+        await pty.waitFor(HEADER_GLYPH, 5_000, erasedAt)
+        pty.term.write('\x1b')
+      },
+      { vars: { CI: 'true' } },
+    )
+
+    expect(outcome.exitCode).toBe(0)
+    expect(outcome.stream.indexOf(ENTER_ALT)).toBeLessThan(outcome.firstFrame)
+    expectSaneTerminal(outcome)
+  })
+})
+
+describe('starting without a terminal', () => {
+  it('exits 64 with the stdin message on stderr and never enters the alternate screen when stdin is /dev/null', async () => {
+    const { dir, home } = await repoWithChains()
+    const bin = await providerShims(false)
+    const pty = startInPty([], dir, scenarioEnv(home, bin), '</dev/null')
+
+    const outcome = await finish(pty, undefined)
+
+    expect(outcome.exitCode).toBe(EXIT_USAGE)
+    expect(outcome.stream.trim()).toBe(noTerminalOn('stdin'))
+    expect(outcome.stream).not.toContain(ENTER_ALT)
+    expect({
+      echo: sttyFlag(outcome.stty, 'echo'),
+      icanon: sttyFlag(outcome.stty, 'icanon'),
+    }).toEqual({ echo: true, icanon: true })
+  })
+
+  it('exits 64 with the stdout message on stderr and writes nothing to stdout when stdout is a file', async () => {
+    const { dir, home } = await repoWithChains()
+    const bin = await providerShims(false)
+    const out = await tmpDir('rensa-out-')
+    dirs.push(out)
+    const stdoutFile = path.join(out.dir, 'stdout.txt')
+    const pty = startInPty([], dir, scenarioEnv(home, bin), `>${quote(stdoutFile)}`)
+
+    const outcome = await finish(pty, undefined)
+
+    expect(outcome.exitCode).toBe(EXIT_USAGE)
+    expect(outcome.stream.trim()).toBe(noTerminalOn('stdout'))
+    expect(await readFile(stdoutFile, 'utf8')).toBe('')
+  })
+
+  it('exits 64 with the stdin and stdout message on stderr and nothing on stdout when spawned with pipes', async () => {
+    const { dir, home } = await repoWithChains()
+    const bin = await providerShims(false)
+
+    const result = await runCli([], { cwd: dir, env: scenarioEnv(home, bin) })
+
+    expect(result).toEqual({
+      code: EXIT_USAGE,
+      stdout: '',
+      stderr: `${noTerminalOn('stdin and stdout')}\n`,
+    })
+  })
+})
+
+describe('SIGTERM', () => {
   it('exits 143 and restores the terminal when rensa receives SIGTERM', async () => {
-    const outcome = await scenario(mode, async (pty) => {
+    const outcome = await scenario(async (pty) => {
       process.kill(pty.cliPid(), 'SIGTERM')
     })
 
     expect(outcome.exitCode).toBe(143)
-    expectSaneTerminal(outcome, mode)
+    expectSaneTerminal(outcome)
   })
 })
 
-describe.each(MODES)('startup failure in %s mode', (mode) => {
+describe('startup failure', () => {
   it('prints the error on the primary screen, exits 1 and never enters the alternate screen when run outside a repository', async () => {
     const { dir, home } = await notARepo()
     const bin = await providerShims(false)
-    const env = cliEnv(home, {
-      RENSA_DEV: '1',
-      TERM: 'xterm-256color',
-      CI: undefined,
-      CONTINUOUS_INTEGRATION: undefined,
-      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    })
-    const pty = startInPty(modeArgs(mode), dir, env)
+    const pty = startInPty([], dir, scenarioEnv(home, bin))
 
     const outcome = await finish(pty, undefined)
 
@@ -379,10 +424,9 @@ describe.each(MODES)('startup failure in %s mode', (mode) => {
   })
 })
 
-describe.each(MODES)('foreign output in %s mode', (mode) => {
+describe('foreign output', () => {
   it('keeps a Node warning and a console line out of the frames and prints both on stderr after exit with RENSA_DEBUG=1', async () => {
     const outcome = await scenario(
-      mode,
       async (pty) => {
         await sleep(900)
         pty.term.write('\x1b')
@@ -390,24 +434,19 @@ describe.each(MODES)('foreign output in %s mode', (mode) => {
       { vars: { RENSA_CRASH: 'warn', RENSA_DEBUG: '1' } },
     )
     const { stream } = outcome
-    // Where Ink gave the terminal back: it left the alternate screen, or
-    // showed the cursor again after its last inline frame.
-    const restoredAt =
-      mode === 'fullscreen'
-        ? stream.indexOf(LEAVE_ALT)
-        : stream.indexOf(SHOW_CURSOR, stream.lastIndexOf(HEADER_GLYPH))
+    // Where Ink gave the terminal back: it left the alternate screen.
+    const restoredAt = stream.indexOf(LEAVE_ALT)
 
     expect(outcome.exitCode).toBe(0)
     expect(stream.slice(outcome.firstFrame, restoredAt)).not.toContain(CRASH_WARNING)
     expect(stream.slice(outcome.firstFrame, restoredAt)).not.toContain(CRASH_CONSOLE)
     expect(stream.slice(restoredAt)).toContain(CRASH_WARNING)
     expect(stream.slice(restoredAt)).toContain(CRASH_CONSOLE)
-    expectSaneTerminal(outcome, mode)
+    expectSaneTerminal(outcome)
   })
 
   it('never shows the warning or the console line when RENSA_DEBUG is not set', async () => {
     const outcome = await scenario(
-      mode,
       async (pty) => {
         await sleep(900)
         pty.term.write('\x1b')
@@ -421,25 +460,24 @@ describe.each(MODES)('foreign output in %s mode', (mode) => {
   })
 })
 
-describe.each(MODES)('crashes in %s mode', (mode) => {
+describe('crashes', () => {
   it.each([
     ['render', 'a throw inside render', 'RENSA_CRASH=render: dev-only throw during render'],
     ['timer', 'an uncaught throw from a timer', 'RENSA_CRASH=timer: dev-only throw from a timer'],
   ])(
     'prints a readable stack after restoring the terminal, exits 1 and leaves no rensa process when RENSA_CRASH=%s (%s)',
     async (crash, _, message) => {
-      const outcome = await scenario(mode, (pty) => pty.waitFor(EXIT_MARK).then(() => {}), {
+      const outcome = await scenario((pty) => pty.waitFor(EXIT_MARK).then(() => {}), {
         vars: { RENSA_CRASH: crash },
       })
       const { stream } = outcome
       const stackAt = stream.lastIndexOf(message)
-      const restoredAt =
-        mode === 'fullscreen' ? stream.lastIndexOf(LEAVE_ALT) : stream.lastIndexOf(HEADER_GLYPH)
+      const restoredAt = stream.lastIndexOf(LEAVE_ALT)
 
       expect(outcome.exitCode).toBe(1)
       expect(stackAt).toBeGreaterThan(restoredAt)
       expect(stream.slice(stackAt)).toMatch(/\n\s+at /)
-      expectSaneTerminal(outcome, mode)
+      expectSaneTerminal(outcome)
     },
   )
 })

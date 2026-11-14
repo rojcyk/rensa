@@ -2,11 +2,9 @@ import { Box } from 'ink'
 import type { ReactNode } from 'react'
 import { bodyIsStatusOnly, isNarrow, SINGLE_GUTTER, SPLIT_GUTTER } from '../layout.js'
 import { useBudget, useSize } from '../size.js'
-import type { Mode } from '../terminalSession.js'
 import { theme } from '../theme.js'
 
 export interface LayoutProps {
-  mode: Mode
   header: ReactNode
   /** Rows the header asks for; `short` compact mode collapses it to one. */
   headerRows: number
@@ -34,22 +32,20 @@ export interface LayoutProps {
 
 /**
  * Header, body and footer with row budgets from `layoutBudget`, applied
- * on the same frame as a resize. Fullscreen takes exactly the window's
- * rows; inline takes what it needs up to the window's rows. Every region
- * clips its content.
+ * on the same frame as a resize. Takes exactly the window's rows. Every
+ * region clips its content.
  */
 export function Layout(props: LayoutProps): ReactNode {
-  const { mode, header, headerRows, body, footer, footerRows = 0, split, status } = props
+  const { header, headerRows, body, footer, footerRows = 0, split, status } = props
   const { columns, rows } = useSize()
   const budget = useBudget({
     headerRows,
     footerRows: footer === undefined ? 0 : footerRows,
     ...(split && { leftIdWidth: split.leftIdWidth }),
   }).current
-  const rowsOf = (n: number) => (mode === 'fullscreen' ? { height: n } : { maxHeight: n })
 
   return (
-    <Box flexDirection="column" width={columns} overflow="hidden" {...rowsOf(rows)}>
+    <Box flexDirection="column" width={columns} overflow="hidden" height={rows}>
       {budget.headerRows > 0 && (
         <Box
           flexDirection="column"
@@ -61,7 +57,7 @@ export function Layout(props: LayoutProps): ReactNode {
           <Natural>{header}</Natural>
         </Box>
       )}
-      <Box flexShrink={0} width={columns} overflow="hidden" {...rowsOf(budget.bodyRows)}>
+      <Box flexShrink={0} width={columns} overflow="hidden" height={budget.bodyRows}>
         {bodyIsStatusOnly(budget) ? (
           <Box flexDirection="column" width={columns} overflow="hidden">
             <Natural>{status}</Natural>
@@ -102,8 +98,8 @@ export function Layout(props: LayoutProps): ReactNode {
               borderRight={false}
               borderBottom={false}
               borderColor={theme.dim}
-              // `backgroundColor` excludes border cells: in fullscreen the separator takes the root fill (rule D).
-              {...(mode === 'fullscreen' && { borderBackgroundColor: theme.background })}
+              // `backgroundColor` excludes border cells: the separator takes the root fill (rule D).
+              borderBackgroundColor={theme.background}
               // The border is the gutter's first column; content width is
               // rightCols − SPLIT_GUTTER, the budget's transcriptCols.
               paddingLeft={SPLIT_GUTTER - 1}

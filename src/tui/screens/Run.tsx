@@ -31,7 +31,6 @@ import { type Action, type Focus, type RawKey, useKeys } from '../hooks/useKeys.
 import { isShort, type LayoutWant } from '../layout.js'
 import { useBudget, useSize } from '../size.js'
 import { useStore } from '../store.js'
-import type { Mode } from '../terminalSession.js'
 import { theme } from '../theme.js'
 
 /** A live run and its chain, or a run directory read back from disk (the history screen, deferred). */
@@ -44,7 +43,6 @@ export interface RunProps {
   requestQuit(): void
   /** False while an app-level overlay holds the keys. */
   active: boolean
-  mode: Mode
   /** The app's header; its branch is replaced by the run's base once known. */
   header: HeaderProps
   /** The app's quit overlay; takes the footer in place of the note box while it shows. */
@@ -122,7 +120,7 @@ function DiskRun(props: ScreenProps & { dir: RunDir }): ReactNode {
 function DiskPlaceholder(
   props: ScreenProps & { state: Exclude<DiskState, { kind: 'loaded' }> },
 ): ReactNode {
-  const { state, navigate, requestQuit, active, mode, header } = props
+  const { state, navigate, requestQuit, active, header } = props
   useKeys(
     (action) => {
       if (action === 'quit') requestQuit()
@@ -132,7 +130,6 @@ function DiskPlaceholder(
   )
   return (
     <Layout
-      mode={mode}
       header={<Header {...header} />}
       headerRows={HEADER_ROWS}
       body={
@@ -159,7 +156,7 @@ function useSyncState<T>(initial: T): [T, () => T, (next: T) => void] {
 function RunScreen(
   props: ScreenProps & { view: RunView; chain: ResolvedChain; commands?: RunCommands },
 ): ReactNode {
-  const { view, chain, commands, navigate, requestQuit, active, mode, header, overlay } = props
+  const { view, chain, commands, navigate, requestQuit, active, header, overlay } = props
   const steps = chain.steps
   const progress = useStore(view.store, (s) => s.progress)
   const [base] = useState(() => runBase(view.events))
@@ -386,7 +383,6 @@ function RunScreen(
   const narrow = current.compact === 'narrow' || current.compact === 'both'
   const blockRows = BLOCK_CHROME_ROWS + agentRowsHeight(rows)
   const transcriptRows = Math.max(0, current.bodyRows - blockRows - (narrow ? STRIP_ROWS : 0))
-  const borderBackground = mode === 'fullscreen' ? { borderBackgroundColor: theme.background } : {}
 
   const statusRow =
     killing !== undefined && shownFocus === 'confirm' ? (
@@ -407,7 +403,7 @@ function RunScreen(
       enabled={enabled}
       width={columns}
       variant={inputVariant}
-      {...borderBackground}
+      borderBackgroundColor={theme.background}
     />
   )
 
@@ -422,7 +418,6 @@ function RunScreen(
 
   return (
     <Layout
-      mode={mode}
       header={
         <>
           <Header {...header} branch={base ?? header.branch} />
