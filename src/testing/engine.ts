@@ -92,8 +92,9 @@ export async function engineRepo(chains: readonly string[]): Promise<EngineRepo>
     async cleanup() {
       for (const handle of handles) handle.abort()
       await Promise.allSettled(handles.map((h) => within(h.done, 10_000, `run ${h.id} to end`)))
-      // The provider checks run the real CLIs with `home` as HOME, and
-      // those write there; removing it under them fails with ENOTEMPTY.
+      // The provider checks get the live process.env (the fake one reads
+      // it after RENSA_FAKE_AVAILABLE_DELAY_MS), so let any still in
+      // flight finish before the stubs are undone and `home` is removed.
       await Promise.all(engines.map((e) => e.providersChecked))
       vi.unstubAllEnvs()
       await Promise.all([repo.cleanup(), home.cleanup()])
