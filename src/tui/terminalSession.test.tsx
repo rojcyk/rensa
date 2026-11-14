@@ -3,13 +3,16 @@ import type { ReactNode } from 'react'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { diag } from '../engine/index.js'
 import { MAX_FPS } from './frameRate.js'
+import { createWheelHub, type WheelDirection } from './mouse.js'
 import { createTeardown, type Session, startSession, terminalProblem } from './terminalSession.js'
 
 // Ink's render and the process exit registry are the two boundaries the
 // session does not own: render is replaced by a stub per test, and the
 // registry's callbacks are collected so a test can run them as process
 // exit would. Synchronous stderr writes (fd 2) are recorded in the same
-// log as stdout writes, so their order can be asserted.
+// log as stdout writes, so their order can be asserted. stdin's `read`
+// is replaced per test by one that hands out what the test has the
+// terminal send, so the session's mouse filter never patches the real one.
 
 const boundary = vi.hoisted(() => ({
   render: undefined as undefined | ((node: ReactNode, options: RenderOptions) => Instance),
@@ -61,6 +64,11 @@ const ENTER_ALT = '\x1b[?1049h'
 const LEAVE_ALT = '\x1b[?1049l'
 const SHOW_CURSOR = '\x1b[?25h'
 const RESET = '\x1b[0m'
+/** Normal mouse tracking in SGR encoding, on and off. */
+const MOUSE_ON = '\x1b[?1000h\x1b[?1006h'
+const MOUSE_OFF = '\x1b[?1006l\x1b[?1000l'
+/** A wheel turn as the terminal reports it while mouse tracking is on. */
+const WHEEL_UP_REPORT = '\x1b[<64;40;12M'
 
 /** Runs the collected shutdown callbacks as process exit does: LIFO, each once. */
 function runShutdown(): void {
@@ -121,6 +129,8 @@ const APP = <Text>rensa</Text>
 
 let restoreDescriptors: Array<() => void> = []
 const setRawMode = vi.fn()
+/** What the terminal sent on stdin that nothing has read yet. */
+let stdinChunks: string[] = []
 
 function defineFor(target: object, prop: string, value: unknown): void {
   const previous = Object.getOwnPropertyDescriptor(target, prop)
@@ -136,12 +146,25 @@ function terminal(opts: { stdoutTTY: boolean; stdinTTY: boolean }): void {
   defineFor(process.stdout, 'isTTY', opts.stdoutTTY)
   defineFor(process.stdin, 'isTTY', opts.stdinTTY)
   defineFor(process.stdin, 'setRawMode', setRawMode)
+  defineFor(process.stdin, 'read', () => stdinChunks.shift() ?? null)
+}
+
+/** The terminal sends `chunks`; returns what Ink reads of them, reading as it does, until null. */
+function inkReads(...chunks: string[]): string[] {
+  stdinChunks.push(...chunks)
+  const seen: string[] = []
+  for (;;) {
+    const chunk: unknown = process.stdin.read()
+    if (chunk === null) return seen
+    seen.push(String(chunk))
+  }
 }
 
 beforeEach(() => {
   boundary.render = undefined
   boundary.shutdown = []
   boundary.log = []
+  stdinChunks = []
   setRawMode.mockReset()
   renderMock.mockClear()
   vi.stubEnv('CI', undefined)
@@ -397,7 +420,7 @@ describe('observing how Ink exited', () => {
     expect(stub.unmount).not.toHaveBeenCalled()
   })
 
-  it('rejects done with the same error, runs the teardown once and releases the terminal when React crashes', async () => {
+  it('rejects done with the same error, runs the teardown once and releases the terminal, turning the mouse off once, when React crashes', async () => {
     const stub = stubInstance()
     // Were the record not released, the fatal restore would try Ink again
     // and, on this throw, write the leave sequence itself.
@@ -417,7 +440,7 @@ describe('observing how Ink exited', () => {
 
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(stub.unmount).not.toHaveBeenCalled()
-    expect(stdoutText()).toBe('')
+    expect(stdoutText()).toBe(MOUSE_ON + MOUSE_OFF)
   })
 
   it('returns the same promise from a second quit and unmounts once', async () => {
@@ -448,8 +471,128 @@ describe('observing how Ink exited', () => {
   })
 })
 
+describe('mouse reporting while the session holds the terminal', () => {
+  type Stub = ReturnType<typeof stubInstance>
+
+  /** Each way a session ends, as `main.ts`, Ink and process exit end it. */
+  const EXITS: Array<[string, (stub: Stub, session: Session) => Promise<void>]> = [
+    ['the user quits', (_stub, session) => session.quit()],
+    [
+      'Ink exits on its own',
+      (stub, session) => {
+        inkLeavesAlternateScreen()
+        stub.exit.resolve()
+        return session.done
+      },
+    ],
+    [
+      'the process dies and the fatal restore runs',
+      async () => {
+        runShutdown()
+      },
+    ],
+  ]
+
+  /** Ink's render on a terminal: it enters the alternate screen inside the constructor. */
+  function startOnTerminal(wheel = createWheelHub()) {
+    const stub = stubInstance(inkLeavesAlternateScreen)
+    boundary.render = () => {
+      process.stdout.write(ENTER_ALT)
+      return stub.instance
+    }
+    const session = startSession(APP, createTeardown(), wheel)
+    return { stub, session }
+  }
+
+  it('turns mouse reporting on after Ink entered the alternate screen when stdout and stdin are terminals', () => {
+    startOnTerminal()
+
+    expect(stdoutText()).toBe(ENTER_ALT + MOUSE_ON)
+  })
+
+  it.each([
+    ['stdin is a pipe', { stdoutTTY: true, stdinTTY: false }],
+    ['stdout is a pipe', { stdoutTTY: false, stdinTTY: true }],
+  ])('never turns mouse reporting on or off when %s', async (_case, tty) => {
+    terminal(tty)
+    const { session } = startOnTerminal()
+
+    await session.quit()
+    runShutdown()
+
+    expect(stdoutText()).not.toContain(MOUSE_ON)
+    expect(stdoutText()).not.toContain(MOUSE_OFF)
+  })
+
+  it('turns mouse reporting off before Ink leaves the alternate screen, once, when the user quits', async () => {
+    const { session } = startOnTerminal()
+
+    await session.quit()
+    runShutdown()
+
+    expect(stdoutText()).toBe(ENTER_ALT + MOUSE_ON + MOUSE_OFF + LEAVE_ALT + SHOW_CURSOR)
+  })
+
+  it('turns mouse reporting off once, after Ink released the terminal, when Ink exits on its own', async () => {
+    const { stub, session } = startOnTerminal()
+
+    inkLeavesAlternateScreen()
+    stub.exit.resolve()
+    await session.done
+    runShutdown()
+
+    expect(stdoutText()).toBe(ENTER_ALT + MOUSE_ON + LEAVE_ALT + SHOW_CURSOR + MOUSE_OFF)
+  })
+
+  it('turns mouse reporting off before the alternate screen is left, once, when the fatal restore runs twice', () => {
+    startOnTerminal()
+    const [callback] = boundary.shutdown
+    assert(callback, 'startSession registered a shutdown callback')
+
+    callback()
+    callback()
+
+    expect(stdoutText()).toBe(ENTER_ALT + MOUSE_ON + MOUSE_OFF + LEAVE_ALT + SHOW_CURSOR)
+  })
+
+  it('hands a wheel turn on stdin to the wheel subscribers and gives Ink only the keys around it while the session runs', () => {
+    const wheel = createWheelHub()
+    const turns: WheelDirection[] = []
+    wheel.subscribe((direction) => turns.push(direction))
+    startOnTerminal(wheel)
+
+    const seen = inkReads(`j${WHEEL_UP_REPORT}k`)
+
+    expect({ seen, turns }).toEqual({ seen: ['j', 'k'], turns: ['up'] })
+  })
+
+  it.each(EXITS)('gives Ink stdin unfiltered again when %s', async (_exit, end) => {
+    const wheel = createWheelHub()
+    const turns: WheelDirection[] = []
+    wheel.subscribe((direction) => turns.push(direction))
+    const { stub, session } = startOnTerminal(wheel)
+
+    await end(stub, session)
+    const seen = inkReads(WHEEL_UP_REPORT)
+
+    expect({ seen, turns }).toEqual({ seen: [WHEEL_UP_REPORT], turns: [] })
+  })
+
+  it('leaves stdin unfiltered when stdin is a pipe', () => {
+    terminal({ stdoutTTY: true, stdinTTY: false })
+    const wheel = createWheelHub()
+    const turns: WheelDirection[] = []
+    wheel.subscribe((direction) => turns.push(direction))
+    startOnTerminal(wheel)
+
+    const seen = inkReads(WHEEL_UP_REPORT)
+
+    expect({ seen, turns }).toEqual({ seen: [WHEEL_UP_REPORT], turns: [] })
+  })
+})
+
 describe('the fatal restore on a terminal', () => {
-  it('lets Ink unmount and writes nothing of its own, so one leave sequence reaches the terminal', () => {
+  it('turns the mouse off, then lets Ink unmount and writes nothing else of its own, so one leave sequence reaches the terminal', () => {
     const stub = stubInstance(inkLeavesAlternateScreen)
     boundary.render = () => stub.instance
     startSession(APP)
@@ -457,7 +600,7 @@ describe('the fatal restore on a terminal', () => {
     runShutdown()
 
     expect(stub.unmount).toHaveBeenCalledTimes(1)
-    expect(stdoutText()).toBe(`${LEAVE_ALT}${SHOW_CURSOR}`)
+    expect(stdoutText()).toBe(`${MOUSE_ON}${MOUSE_OFF}${LEAVE_ALT}${SHOW_CURSOR}`)
   })
 
   it('emits nothing when the callback runs a second time', () => {
@@ -475,7 +618,7 @@ describe('the fatal restore on a terminal', () => {
     expect(stub.unmount).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves the alternate screen, shows the cursor, resets attributes and leaves raw mode itself, once, when Ink unmount throws', () => {
+  it('turns the mouse off, then leaves the alternate screen, shows the cursor, resets attributes and leaves raw mode itself, once, when Ink unmount throws', () => {
     const stub = stubInstance()
     stub.unmount.mockImplementation(() => {
       throw new Error('yoga node already freed')
@@ -488,7 +631,7 @@ describe('the fatal restore on a terminal', () => {
     callback()
     callback()
 
-    expect(stdoutText()).toBe(`${LEAVE_ALT}${SHOW_CURSOR}${RESET}`)
+    expect(stdoutText()).toBe(`${MOUSE_ON}${MOUSE_OFF}${LEAVE_ALT}${SHOW_CURSOR}${RESET}`)
     expect(setRawMode.mock.calls).toEqual([[false]])
   })
 
@@ -506,7 +649,7 @@ describe('the fatal restore on a terminal', () => {
     expect(stdoutText()).not.toContain(RESET)
   })
 
-  it('leaves the alternate screen and shows the cursor itself when Ink unmount throws and CI is set', () => {
+  it('turns the mouse off, then leaves the alternate screen and shows the cursor itself when Ink unmount throws and CI is set', () => {
     vi.stubEnv('CI', 'true')
     const stub = stubInstance()
     stub.unmount.mockImplementation(() => {
@@ -517,7 +660,7 @@ describe('the fatal restore on a terminal', () => {
 
     runShutdown()
 
-    expect(stdoutText()).toBe(`${LEAVE_ALT}${SHOW_CURSOR}${RESET}`)
+    expect(stdoutText()).toBe(`${MOUSE_ON}${MOUSE_OFF}${LEAVE_ALT}${SHOW_CURSOR}${RESET}`)
   })
 })
 
@@ -562,10 +705,10 @@ describe('capturing foreign output during a session', () => {
     return session
   }
 
-  it('writes nothing to stdout or stderr while the session runs', async () => {
+  it('writes nothing to stdout or stderr but the mouse switch while the session runs', async () => {
     await sessionWithForeignOutput()
 
-    expect(boundary.log).toEqual([])
+    expect(boundary.log).toEqual([{ to: 'stdout', text: MOUSE_ON }])
   })
 
   it('holds the three lines in order in the captured list after quit', async () => {
@@ -643,6 +786,8 @@ describe('handing out captured lines', () => {
     callback()
 
     expect(boundary.log).toEqual([
+      { to: 'stdout', text: MOUSE_ON },
+      { to: 'stdout', text: MOUSE_OFF },
       { to: 'stdout', text: LEAVE_ALT },
       { to: 'stdout', text: SHOW_CURSOR },
       { to: 'stderr', text: 'undrained line\n' },

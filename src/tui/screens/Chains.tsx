@@ -7,6 +7,7 @@ import { HEADER_ROWS } from '../components/Header.js'
 import { ProviderLine } from '../components/ProviderLine.js'
 import { Rule } from '../components/Rule.js'
 import { useKeys } from '../hooks/useKeys.js'
+import { useWheel } from '../hooks/useWheel.js'
 import { isShort } from '../layout.js'
 import { useBudget, useSize } from '../size.js'
 import { theme } from '../theme.js'
@@ -77,6 +78,8 @@ export function Chains(props: ChainsProps): ReactNode {
       const next = clamp(s.selected + delta, 0, Math.max(0, last))
       return { selected: next, top: windowTop(s.top, next, heights, listRows) }
     })
+
+  useWheel((direction) => move(direction === 'up' ? -1 : 1), { active })
 
   useKeys(
     (action) => {

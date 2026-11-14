@@ -4,12 +4,22 @@ import { type Instance, render } from 'ink'
 import { createContext, type ReactElement } from 'react'
 import { onDiag, onShutdown } from '../engine/index.js'
 import { MAX_FPS } from './frameRate.js'
+import {
+  createWheelHub,
+  DISABLE_MOUSE,
+  ENABLE_MOUSE,
+  filterMouseReads,
+  type WheelDirection,
+  type WheelHub,
+} from './mouse.js'
 
 // The terminal session: the terminal check, Ink's render options, normal
 // quit and the fatal restore. The TUI always draws the full window on the
-// alternate screen. The restore's writes and the resize erase below are
-// the only sanctioned uses of process.stdout under src/tui/; nothing else
-// in the TUI writes to the terminal except Ink.
+// alternate screen, with mouse reporting on so the wheel scrolls rensa's
+// panes instead of the terminal's scrollback. The restore's writes, the
+// mouse mode switches and the resize erase below are the only sanctioned
+// uses of process.stdout under src/tui/; nothing else in the TUI writes to
+// the terminal except Ink.
 
 const LEAVE_ALTERNATE_SCREEN = '\x1b[?1049l'
 const SHOW_CURSOR = '\x1b[?25h'
@@ -70,12 +80,15 @@ export interface SessionControls {
   quit(): Promise<void>
   /** Registers UI-owned cleanup to run on quit, before Ink unmounts. */
   onTeardown(fn: () => void): () => void
+  /** Registers `fn` for every mouse wheel turn; returns its unregister function. */
+  onWheel(fn: (direction: WheelDirection) => void): () => void
 }
 
 /** Components reach the session through this; the default does nothing (tests). */
 export const SessionContext = createContext<SessionControls>({
   quit: () => Promise.resolve(),
   onTeardown: () => () => {},
+  onWheel: () => () => {},
 })
 
 export interface Session {
@@ -106,19 +119,26 @@ interface Ownership {
   cursorHidden: boolean
   rendered: boolean
   rawMode: boolean
+  mouse: boolean
 }
 
 /**
  * Configures Ink and renders `app`. The fatal restore is registered with
  * the engine's shutdown registry before anything else, so a throw from
- * `render` itself still leaves a sane terminal on exit.
+ * `render` itself still leaves a sane terminal on exit. Wheel turns go to
+ * `wheel`'s subscribers.
  */
-export function startSession(app: ReactElement, teardown: Teardown = createTeardown()): Session {
+export function startSession(
+  app: ReactElement,
+  teardown: Teardown = createTeardown(),
+  wheel: WheelHub = createWheelHub(),
+): Session {
   const owned: Ownership = {
     alternateScreen: false,
     cursorHidden: false,
     rendered: false,
     rawMode: false,
+    mouse: false,
   }
   let instance: Instance | undefined
   const captured: string[] = []
@@ -130,6 +150,15 @@ export function startSession(app: ReactElement, teardown: Teardown = createTeard
   }
   let stopCapture: () => void = () => {}
   let stopRepaint: () => void = () => {}
+  let stopMouseFilter: () => void = () => {}
+  /** Turns mouse reporting off and gives Ink stdin unfiltered again. */
+  const releaseMouse = () => {
+    if (owned.mouse) {
+      owned.mouse = false
+      writeTerminal(DISABLE_MOUSE)
+    }
+    stopMouseFilter()
+  }
   /** Set once Ink has exited and the session released the terminal. */
   let ended = false
 
@@ -140,6 +169,7 @@ export function startSession(app: ReactElement, teardown: Teardown = createTeard
     const abnormal = !ended
     stopRepaint()
     stopCapture()
+    releaseMouse()
     restoreTerminal(instance, owned)
     // After the restore, so the lines land on the primary screen.
     if (abnormal || process.env.RENSA_DEBUG === '1') writeStderrSync(drainCaptured())
@@ -170,12 +200,19 @@ export function startSession(app: ReactElement, teardown: Teardown = createTeard
     stopRepaint = repaintOnResize(stdout, instance)
     teardown.add(stopRepaint)
   }
+  // Only with a key reader: without raw mode the reports would echo as text.
+  if (entersAlternateScreen && owned.rawMode) {
+    stopMouseFilter = filterMouseReads(stdin, wheel.emit)
+    owned.mouse = true
+    writeTerminal(ENABLE_MOUSE)
+  }
 
   const exited = instance.waitUntilExit()
   /** Ink has released the terminal; only our own state is left. */
   const released = () => {
     ended = true
     teardown.run()
+    releaseMouse()
     stopCapture()
     owned.alternateScreen = false
     owned.cursorHidden = false
@@ -202,6 +239,7 @@ export function startSession(app: ReactElement, teardown: Teardown = createTeard
     quit() {
       quitting ??= (async () => {
         teardown.run()
+        releaseMouse()
         ink.unmount()
         try {
           await exited

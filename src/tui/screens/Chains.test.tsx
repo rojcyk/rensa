@@ -5,7 +5,9 @@ import type { ChainSummary, ProviderStatus } from '../../engine/index.js'
 import { RensaError } from '../../engine/index.js'
 import { type Frames, renderFrames } from '../../testing/inkFrames.js'
 import type { Navigate } from '../app.js'
+import { createWheelHub, type WheelHub } from '../mouse.js'
 import { SizeProvider } from '../size.js'
+import { SessionContext, type SessionControls } from '../terminalSession.js'
 import { Chains, type ChainsEngine } from './Chains.js'
 
 // Colors carry the selection and the provider states; force truecolor
@@ -177,6 +179,8 @@ interface Screen {
   /** The row (0-based, within the body) a chain's name is drawn on, or -1. */
   rowOf(name: string): number
   resize(rows: number): void
+  /** What the app does when an overlay comes up (false) or goes away (true). */
+  setActive(active: boolean): void
 }
 
 function mount(opts: {
@@ -185,23 +189,33 @@ function mount(opts: {
   rows?: number
   initialChain?: string
   active?: boolean
+  /** Wheel turns reach the screen from this hub, as the app's session hands them out. */
+  wheel?: WheelHub
 }): Screen {
   const { engine } = opts
   const columns = opts.columns ?? 80
   let rows = opts.rows ?? 24
+  let active = opts.active ?? true
   const navigate = vi.fn<Navigate>()
   const requestQuit = vi.fn<() => void>()
+  const session: SessionControls = {
+    quit: () => Promise.resolve(),
+    onTeardown: () => () => {},
+    onWheel: (opts.wheel ?? createWheelHub()).subscribe,
+  }
   const tree = (r: number) => (
-    <SizeProvider columns={columns} rows={r}>
-      <Chains
-        engine={asChainsEngine(engine)}
-        navigate={navigate}
-        requestQuit={requestQuit}
-        active={opts.active ?? true}
-        footerRows={0}
-        {...(opts.initialChain !== undefined && { initialChain: opts.initialChain })}
-      />
-    </SizeProvider>
+    <SessionContext value={session}>
+      <SizeProvider columns={columns} rows={r}>
+        <Chains
+          engine={asChainsEngine(engine)}
+          navigate={navigate}
+          requestQuit={requestQuit}
+          active={active}
+          footerRows={0}
+          {...(opts.initialChain !== undefined && { initialChain: opts.initialChain })}
+        />
+      </SizeProvider>
+    </SessionContext>
   )
   const v = renderFrames(tree(rows), { columns, rows })
   view = v
@@ -236,6 +250,10 @@ function mount(opts: {
       rows = next
       v.resize(columns, next)
       v.rerender(tree(next))
+    },
+    setActive(next) {
+      active = next
+      v.rerender(tree(rows))
     },
   }
 }
@@ -485,6 +503,90 @@ describe('moving the selection and opening a chain', () => {
     // Ink holds a lone ESC for 20 ms in case an escape sequence follows.
     await vi.waitFor(() => expect(s.requestQuit).toHaveBeenCalledTimes(2), { timeout: 1000 })
     expect(s.navigate).not.toHaveBeenCalled()
+  })
+})
+
+describe('moving the selection with the mouse wheel', () => {
+  it('selects the next chain on each wheel down and the previous one on wheel up', async () => {
+    const wheel = createWheelHub()
+    const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), wheel })
+    await effects()
+
+    wheel.emit('down')
+    wheel.emit('down')
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['nightly-audit']))
+    wheel.emit('up')
+
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['review-only']))
+  })
+
+  it('opens the chain the wheel selected when enter is pressed after a wheel down', async () => {
+    const wheel = createWheelHub()
+    const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), wheel })
+    await effects()
+
+    wheel.emit('down')
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['review-only']))
+    await s.press(KEYS.enter)
+
+    expect(s.navigate.mock.calls).toEqual([[{ name: 'detail', chain: 'review-only' }]])
+  })
+
+  it('stays on the last chain when the wheel turns down past the end', async () => {
+    const wheel = createWheelHub()
+    const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), wheel })
+    await effects()
+
+    for (let i = 0; i < 5; i++) wheel.emit('down')
+    wheel.emit('up')
+
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['review-only']))
+  })
+
+  // The provider check landing renders in the same batch as a selection
+  // change queued before it, so once its frame shows, a wheel turn the
+  // screen had taken would show too.
+
+  it('ignores the wheel while an app-level overlay holds the input (active false)', async () => {
+    const wheel = createWheelHub()
+    const engine = new StubEngine(MOCK_CHAINS)
+    const s = mount({ engine, wheel, active: false })
+    await effects()
+
+    wheel.emit('down')
+    engine.completeCheck(MOCK_STATUSES)
+
+    await frameSettles(() => expect(s.lines()[0]).toBe(MOCK_FRAME[0]))
+    expect(s.selectedNames()).toEqual(['tdd-review'])
+  })
+
+  it('stops following the wheel when an overlay comes up after the screen took wheel turns', async () => {
+    const wheel = createWheelHub()
+    const engine = new StubEngine(MOCK_CHAINS)
+    const s = mount({ engine, wheel })
+    await effects()
+    wheel.emit('down')
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['review-only']))
+
+    s.setActive(false)
+    await effects()
+    wheel.emit('down')
+    engine.completeCheck(MOCK_STATUSES)
+
+    await frameSettles(() => expect(s.lines()[0]).toBe(MOCK_FRAME[0]))
+    expect(s.selectedNames()).toEqual(['review-only'])
+  })
+
+  it('follows the wheel again when the overlay goes away', async () => {
+    const wheel = createWheelHub()
+    const s = mount({ engine: new StubEngine(MOCK_CHAINS, MOCK_STATUSES), wheel, active: false })
+    await effects()
+
+    s.setActive(true)
+    await effects()
+    wheel.emit('down')
+
+    await frameSettles(() => expect(s.selectedNames()).toEqual(['review-only']))
   })
 })
 

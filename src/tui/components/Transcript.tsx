@@ -3,6 +3,7 @@ import { memo, type ReactNode, type Ref, useImperativeHandle, useReducer, useRef
 import type { StepView } from '../../engine/index.js'
 import { type RunView, transcriptKey } from '../engineBridge.js'
 import type { LayoutWant } from '../layout.js'
+import type { WheelDirection } from '../mouse.js'
 import { useBudget } from '../size.js'
 import { useStore } from '../store.js'
 import { theme } from '../theme.js'
@@ -11,10 +12,15 @@ import { Row } from './Row.js'
 
 export type ScrollAction = 'pageUp' | 'pageDown' | 'top' | 'bottom'
 
+/** Wrapped lines one wheel turn moves the pane. */
+const WHEEL_LINES = 3
+
 /** What the run screen's key handler asks of the pane. Every call repaints synchronously. */
 export interface TranscriptControls {
   /** `pageUp`/`pageDown` move half a pane; `top` detaches at the start; `bottom` reattaches. */
   scroll(action: ScrollAction): void
+  /** Moves the pane `WHEEL_LINES` up or down; reaching the end reattaches. */
+  wheel(direction: WheelDirection): void
   /** Reattaches the viewport of `(step, label)`, creating it if the pane has not shown it yet. */
   follow(step: string, label: string): void
   /** The tool records with a line in the window, top to bottom. */
@@ -114,6 +120,10 @@ export function Transcript(props: TranscriptProps): ReactNode {
         if (action === 'pageUp') target.scrollBy(-half)
         else if (action === 'pageDown') target.scrollBy(half)
         else target.scrollTo(action)
+        repaint()
+      },
+      wheel(direction) {
+        latest.current.viewport.wheelBy(direction === 'up' ? -WHEEL_LINES : WHEEL_LINES)
         repaint()
       },
       follow(followStep, followLabel) {

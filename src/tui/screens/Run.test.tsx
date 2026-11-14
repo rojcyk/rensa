@@ -30,7 +30,9 @@ import type { Navigate } from '../app.js'
 import type { HeaderProps } from '../components/Header.js'
 import { FRAME_MS } from '../frameRate.js'
 import type { KeyHandler } from '../hooks/useKeys.js'
+import { createWheelHub, type WheelHub } from '../mouse.js'
 import { SizeProvider } from '../size.js'
+import { SessionContext, type SessionControls } from '../terminalSession.js'
 import { theme } from '../theme.js'
 import { Run, type RunScreenSource } from './Run.js'
 
@@ -335,9 +337,21 @@ interface Screen {
   resize(columns: number, rows: number): void
 }
 
-function mount(opts: { source: RunScreenSource; columns?: number; rows?: number }): Screen {
+interface MountOptions {
+  columns?: number
+  rows?: number
+  /** Wheel turns reach the screen from this hub, as the app's session hands them out. */
+  wheel?: WheelHub
+}
+
+function mount(opts: { source: RunScreenSource } & MountOptions): Screen {
   const navigate = vi.fn<Navigate>()
   const requestQuit = vi.fn<() => void>()
+  const session: SessionControls = {
+    quit: () => Promise.resolve(),
+    onTeardown: () => () => {},
+    onWheel: (opts.wheel ?? createWheelHub()).subscribe,
+  }
   const tree = (columns: number, rows: number) => {
     const screen = (
       <Run
@@ -350,16 +364,18 @@ function mount(opts: { source: RunScreenSource; columns?: number; rows?: number 
     )
     // What app.tsx does: the full-window root alone carries theme.background.
     return (
-      <SizeProvider columns={columns} rows={rows}>
-        <Box
-          width={columns}
-          height={rows}
-          flexDirection="column"
-          backgroundColor={theme.background}
-        >
-          {screen}
-        </Box>
-      </SizeProvider>
+      <SessionContext value={session}>
+        <SizeProvider columns={columns} rows={rows}>
+          <Box
+            width={columns}
+            height={rows}
+            flexDirection="column"
+            backgroundColor={theme.background}
+          >
+            {screen}
+          </Box>
+        </SizeProvider>
+      </SessionContext>
     )
   }
   const size = { columns: opts.columns ?? 100, rows: opts.rows ?? 30 }
@@ -407,7 +423,7 @@ function pauseEmits(run: ScriptedRun, step: string): void {
   )
 }
 
-function mountLive(run: ScriptedRun, opts: { columns?: number; rows?: number } = {}): Screen {
+function mountLive(run: ScriptedRun, opts: MountOptions = {}): Screen {
   return mount({ source: { handle: run.handle, chain: TDD_REVIEW }, ...opts })
 }
 
@@ -839,6 +855,78 @@ describe('keys on the run screen', () => {
 
     const row = s.lines().find((l) => l.includes('› tester')) ?? ''
     expect(row.trimEnd().endsWith('12.4k')).toBe(true)
+  })
+})
+
+describe('scrolling the transcript with the mouse wheel', () => {
+  // 30 rows: the transcript shows 19 lines, so 80 one-line records end on lines 61–79.
+  const notes = (count: number): TranscriptRecord[] =>
+    Array.from({ length: count }, (_, i) => ({
+      t: ago(90),
+      kind: 'text',
+      text: `Line ${String(i).padStart(2, '0')} of the limiter notes`,
+    }))
+  /** The transcript lines shown, first and last, without the left column. */
+  const transcriptWindow = (s: Screen) => {
+    const shown = s
+      .lines()
+      .filter((l) => l.includes(' of the limiter notes'))
+      .map((l) => l.slice(LEFT_COLS + 3))
+    return [shown[0], shown.at(-1)]
+  }
+  const lineText = (n: number) => `Line ${String(n).padStart(2, '0')} of the limiter notes`
+
+  it('moves the transcript up three lines on a wheel up while following the end', async () => {
+    const wheel = createWheelHub()
+    const s = mountLive(live(TO_IMPLEMENT, notes(80)), { wheel })
+    await effects()
+    const before = transcriptWindow(s)
+
+    wheel.emit('up')
+
+    await settles(() => expect(transcriptWindow(s)).toEqual([lineText(58), lineText(76)]))
+    expect(before).toEqual([lineText(61), lineText(79)])
+  })
+
+  it('moves the transcript back down three lines on a wheel down short of the end', async () => {
+    const wheel = createWheelHub()
+    const s = mountLive(live(TO_IMPLEMENT, notes(80)), { wheel })
+    await effects()
+    wheel.emit('up')
+    wheel.emit('up')
+    await settles(() => expect(transcriptWindow(s)).toEqual([lineText(55), lineText(73)]))
+
+    wheel.emit('down')
+
+    await settles(() => expect(transcriptWindow(s)).toEqual([lineText(58), lineText(76)]))
+  })
+
+  it('reattaches and shows a record that arrives later when the wheel turns back down to the end', async () => {
+    const wheel = createWheelHub()
+    const run = live(TO_IMPLEMENT, notes(80))
+    const s = mountLive(run, { wheel })
+    await effects()
+    wheel.emit('up')
+    wheel.emit('up')
+    await settles(() => expect(transcriptWindow(s)).toEqual([lineText(55), lineText(73)]))
+
+    wheel.emit('down')
+    wheel.emit('down')
+    run.record('implement', 'impl', { kind: 'text', text: lineText(80) })
+
+    await settles(() => expect(transcriptWindow(s)).toEqual([lineText(62), lineText(80)]))
+  })
+
+  it('scrolls the transcript and keeps the half-typed note when the wheel turns while typing in the note box', async () => {
+    const wheel = createWheelHub()
+    const s = mountLive(live(TO_IMPLEMENT, notes(80)), { wheel })
+    await effects()
+    await s.type('abc')
+
+    wheel.emit('up')
+
+    await settles(() => expect(transcriptWindow(s)).toEqual([lineText(58), lineText(76)]))
+    expect(noteRow(s)).toContain('› abc')
   })
 })
 

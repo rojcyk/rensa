@@ -563,6 +563,101 @@ describe('follow mode', () => {
   })
 })
 
+describe('wheel turns', () => {
+  // Ten one-line records in a three-line window: the last window starts at line 7.
+
+  it('detaches and moves up three lines when wheeled up by 3 while following', () => {
+    const { viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+
+    viewport.wheelBy(-3)
+
+    expect(viewport.following).toBe(false)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([4, 5, 6])
+  })
+
+  it('keeps following, new records included, when wheeled down while following', () => {
+    const { buffer, viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+
+    viewport.wheelBy(3)
+    buffer.push(text('Entry 10'))
+    viewport.sync()
+
+    expect(viewport.following).toBe(true)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([8, 9, 10])
+  })
+
+  it('keeps following, new records included, when wheeled up while the content fits the window', () => {
+    const { buffer, viewport } = viewportOf(entries(0, 2), 40)
+    viewport.visible(3)
+
+    viewport.wheelBy(-3)
+    for (const record of entries(2, 3)) buffer.push(record)
+    viewport.sync()
+
+    expect(viewport.following).toBe(true)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([2, 3, 4])
+  })
+
+  it('stays detached and moves down three lines when wheeled down short of the end', () => {
+    const { viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+    viewport.scrollTo('top')
+
+    viewport.wheelBy(3)
+
+    expect(viewport.following).toBe(false)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([3, 4, 5])
+  })
+
+  it('reattaches, new records included, when a wheel down lands exactly on the last window', () => {
+    const { buffer, viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+    viewport.scrollBy(-3)
+
+    viewport.wheelBy(3)
+    buffer.push(text('Entry 10'))
+    viewport.sync()
+
+    expect(viewport.following).toBe(true)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([8, 9, 10])
+  })
+
+  it('reattaches at the last window when a wheel down would move past the end', () => {
+    const { viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+    viewport.scrollBy(-1)
+
+    viewport.wheelBy(3)
+
+    expect(viewport.following).toBe(true)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([7, 8, 9])
+  })
+
+  it('reattaches when wheeled down while detached on the last window', () => {
+    const { viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+    viewport.scrollBy(-1)
+    viewport.scrollBy(1)
+
+    viewport.wheelBy(3)
+
+    expect(viewport.following).toBe(true)
+  })
+
+  it('stays detached at the first line when wheeled up past the top', () => {
+    const { viewport } = viewportOf(entries(0, 10), 40)
+    viewport.visible(3)
+    viewport.scrollBy(-6)
+
+    viewport.wheelBy(-3)
+
+    expect(viewport.following).toBe(false)
+    expect(viewport.visible(3).map((r) => r.record)).toEqual([0, 1, 2])
+  })
+})
+
 const LINE_1 = 'Reading the four new tests in quote.ratelimit.test.ts to understand the window.'
 const LINE_2 = 'The token bucket is keyed on the API key header and refills every second.'
 const LINE_3 = 'Next I will edit src/middleware/ratelimit.ts to add the limiter and its tests.'

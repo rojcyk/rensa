@@ -477,6 +477,17 @@ export class TranscriptViewport {
     this.anchorPos = this.anchorAt(Math.min(Math.max(0, from + step), maxTop))
   }
 
+  /**
+   * A wheel turn: moves like `scrollBy`, but a move down that reaches the
+   * end reattaches, and a move with nothing to scroll past keeps following.
+   */
+  wheelBy(lines: number): void {
+    const maxTop = this.maxTop(this.lastHeight)
+    if (this.followingFlag && (lines > 0 || maxTop === 0)) return
+    this.scrollBy(lines)
+    if (lines > 0 && this.lineOf(this.anchorPos) >= maxTop) this.follow()
+  }
+
   /** `top` detaches at the first retained line; `bottom` reattaches. */
   scrollTo(edge: 'top' | 'bottom'): void {
     if (edge === 'bottom') {

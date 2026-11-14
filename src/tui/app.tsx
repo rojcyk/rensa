@@ -6,6 +6,7 @@ import type { Engine, RunHandle } from '../engine/index.js'
 import { HEADER_ROWS, Header, type HeaderProps } from './components/Header.js'
 import { Layout } from './components/Layout.js'
 import { useKeys } from './hooks/useKeys.js'
+import { createWheelHub } from './mouse.js'
 import { Chains } from './screens/Chains.js'
 import { Detail } from './screens/Detail.js'
 import { Run } from './screens/Run.js'
@@ -35,17 +36,20 @@ export type Navigate = (screen: Screen) => void
  */
 export function start(engine: Engine, screen: Screen): Session {
   const teardown = createTeardown()
+  const wheel = createWheelHub()
   let session: Session | undefined
   // Components only quit from key handlers, after `startSession` returned.
   const controls: SessionControls = {
     quit: () => session?.quit() ?? Promise.resolve(),
     onTeardown: teardown.add,
+    onWheel: wheel.subscribe,
   }
   session = startSession(
     <SessionContext value={controls}>
       <App engine={engine} initial={screen} />
     </SessionContext>,
     teardown,
+    wheel,
   )
   return session
 }

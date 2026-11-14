@@ -28,6 +28,7 @@ import { StepList } from '../components/StepList.js'
 import { Transcript, type TranscriptControls } from '../components/Transcript.js'
 import { loadRunDir, RunView, transcriptKey } from '../engineBridge.js'
 import { type Action, type Focus, type RawKey, useKeys } from '../hooks/useKeys.js'
+import { useWheel } from '../hooks/useWheel.js'
 import { isShort, type LayoutWant } from '../layout.js'
 import { useBudget, useSize } from '../size.js'
 import { useStore } from '../store.js'
@@ -314,6 +315,9 @@ function RunScreen(
     }
     setInput(editInput(getInput(), raw))
   }
+
+  // The wheel scrolls the transcript from any focus, as the page keys do from `main`.
+  useWheel((direction) => transcript.current?.wheel(direction), { active })
 
   // Synchronous throughout: every state change lands before the handler returns.
   useKeys(
