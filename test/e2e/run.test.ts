@@ -2,9 +2,10 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
-import { afterEach, assert, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, assert, beforeAll, describe, expect, it, vi } from 'vitest'
 import { commitAll, installChains } from '../../src/testing/chains.js'
 import { builtCli, cliEnv, exited, linesOf, runCli, startCli } from '../../src/testing/cli.js'
+import { killProcessesWithArgs, processesWithArgs } from '../../src/testing/processes.js'
 import { git, type TmpDir, type TmpRepo, tmpDir, tmpRepo } from '../../src/testing/tmpRepo.js'
 
 // `rensa run` as a user runs it: the built CLI in a temporary repository
@@ -286,5 +287,38 @@ describe('a reader that closes stdout mid-run', () => {
     expect({ code, stderr }).toEqual({ code: 1, stderr: 'aborting: stdout was closed\n' })
     expect(events.at(-1)).toMatchObject({ type: 'run.finished', data: { status: 'aborted' } })
     expect(existsSync(path.join(s.projectDir, 'lock'))).toBe(false)
+  })
+})
+
+describe('rensa killed by SIGKILL mid-step', () => {
+  // The fixture's sleep; its duration is unique to this test.
+  const SLEEP = 'sleep 30.6533'
+
+  afterEach(async () => {
+    await killProcessesWithArgs(SLEEP)
+  })
+
+  it('stops the running shell step within the kill grace when rensa is SIGKILLed', async () => {
+    const s = await repoWith(['sleep-orphan'])
+    const child = startCli(['run', 'sleep-orphan'], {
+      cwd: s.repo.dir,
+      env: cliEnv(s.home.dir, { RENSA_DEV: '1' }),
+    })
+    const gone = new Promise<NodeJS.Signals | null>((resolve) =>
+      child.once('exit', (_code, signal) => resolve(signal)),
+    )
+    await vi.waitFor(async () => expect(await processesWithArgs(SLEEP)).toHaveLength(1), {
+      timeout: 10_000,
+      interval: 50,
+    })
+
+    child.kill('SIGKILL')
+    assert((await gone) === 'SIGKILL', 'rensa ended before it was SIGKILLed')
+
+    // Inside the default 5 s grace: the step dies on the lifeline's SIGTERM.
+    await vi.waitFor(async () => expect(await processesWithArgs(SLEEP)).toHaveLength(0), {
+      timeout: 3_000,
+      interval: 50,
+    })
   })
 })

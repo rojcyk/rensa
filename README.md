@@ -145,9 +145,8 @@ only in a folder it has been told to trust.
 
 ## Limits
 
-- `SIGKILL` of rensa itself leaves the terminal and the agent processes
-  as they were: the terminal can stay in raw mode or on the alternate
-  screen (`reset` restores it), and the agents keep running.
+- `SIGKILL` of rensa itself leaves the terminal as it was: it can stay
+  in raw mode or on the alternate screen (`reset` restores it).
 - A child that moves itself out of its process group with `setsid` is
   not stopped by kill, abort or exit.
 

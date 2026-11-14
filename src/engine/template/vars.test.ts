@@ -449,10 +449,10 @@ describe('shell var environment', () => {
 
 describe('shell var process groups', () => {
   it('registers the command group while it runs and drops it once evaluateVars resolves', async () => {
-    // The shell is the group leader, so its $$ is the pgid. It waits for
-    // the test to create `release` before it exits.
+    // The shell runs in the group the lifeline leads, so it reads the
+    // pgid from ps. It waits for the test to create `release` before it exits.
     const command =
-      "printf '%s' $$ > pgid.txt; while [ ! -e release ]; do sleep 0.05; done; printf 'released'"
+      "ps -o pgid= -p $$ | tr -d ' \\n' > pgid.txt; while [ ! -e release ]; do sleep 0.05; done; printf 'released'"
     const pending = evaluateVars({ gate: shell(command) }, namespace(), dir.dir)
     const pgid = await vi.waitFor(async () => {
       const text = await readFile(path.join(dir.dir, 'pgid.txt'), 'utf8')

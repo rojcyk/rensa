@@ -1,8 +1,14 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import type { Readable } from 'node:stream'
+import { Duplex, type Readable } from 'node:stream'
 import { diag } from '../diag.js'
 import { RensaError } from '../errors.js'
+import {
+  type LifelineReport,
+  lifelineCommand,
+  lifelineEnv,
+  parseLifelineReport,
+} from './lifeline.js'
 import { lineReader } from './lines.js'
 import { onShutdown } from './shutdown.js'
 
@@ -10,6 +16,10 @@ import { onShutdown } from './shutdown.js'
 // process group, and everything here acts on the group: a group outlives
 // its leader, and a grandchild that survives the leader keeps the pipes
 // open.
+//
+// Every child runs inside the lifeline (lifeline.ts), which stops the
+// group when this process dies by a signal that skips 'exit', SIGKILL
+// included. The group's leader, and so `pid`, is the lifeline.
 
 export interface SpawnOptions {
   argv: string[]
@@ -38,13 +48,19 @@ export interface SpawnResult {
 }
 
 export interface Child {
-  /** Undefined when the spawn itself failed; `result` then rejects. */
+  /**
+   * The process group: the lifeline's pid, not the command's. Undefined
+   * when not even the lifeline started; `result` rejects then, and also
+   * when the lifeline started but the command could not.
+   */
   pid: number | undefined
   kill(): void
   result: Promise<SpawnResult>
 }
 
 const DEFAULT_ESCALATE_MS = 5000
+// rensa's own SIGKILL on kill(), in graces: after the lifeline's.
+const BACKSTOP_FACTOR = 2
 // How often a group that outlived its result is checked for being gone.
 const PRUNE_INTERVAL_MS = 1000
 
@@ -91,7 +107,7 @@ export class KillSignal {
 }
 
 export function spawnProcess(opts: SpawnOptions): Child {
-  const [command, ...args] = opts.argv
+  const command = opts.argv[0]
   if (command === undefined) throw new RensaError('INTERNAL', 'spawnProcess: empty argv')
   if ((opts.onStdout && opts.onStdoutChunk) || (opts.onStderr && opts.onStderrChunk)) {
     throw new RensaError('INTERNAL', 'spawnProcess: a stream takes lines or chunks, not both')
@@ -99,17 +115,25 @@ export function spawnProcess(opts: SpawnOptions): Child {
   const escalateMs = opts.escalateMs ?? DEFAULT_ESCALATE_MS
   const started = Date.now()
 
-  const proc = spawn(command, args, {
+  const wrapped = lifelineCommand(opts.argv, escalateMs)
+  const proc = spawn(wrapped.command, wrapped.args, {
     cwd: opts.cwd,
-    env: opts.env,
+    env: lifelineEnv(opts.env),
     detached: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
   })
   const pid = proc.pid
+  // A stream even when the spawn failed; anything else is a broken stdio list.
+  const lifeline = proc.stdio[3]
+  if (!(lifeline instanceof Duplex)) {
+    throw new RensaError('INTERNAL', 'spawnProcess: fd 3 of the lifeline is not a pipe')
+  }
 
   // A child that exits without reading stdin makes the write fail with
   // EPIPE; that is not an error of ours.
   proc.stdin.on('error', () => {})
+  // Likewise a stop written to a lifeline that has already exited.
+  lifeline.on('error', () => {})
 
   let settled = false
   let killed = false
@@ -124,14 +148,26 @@ export function spawnProcess(opts: SpawnOptions): Child {
     // After the group is gone its pgid may belong to someone else.
     if (settled && !liveGroups.has(pid)) return
     killed = true
+    // The lifeline takes it from here: it SIGKILLs the group once the
+    // grace has passed. This SIGKILL is the backstop for a lifeline that
+    // is already gone, and comes later than the lifeline's, so the two
+    // never meet a group of unreaped zombies (EPERM on macOS).
+    // Before the signal, so that the lifeline knows the command's exit is
+    // part of the stop even if it sees that exit before its own SIGTERM.
+    lifeline.write('stop\n')
     signalGroup(pid, 'SIGTERM')
-    // Unconditional: a leader that already exited is exactly the case a
-    // SIGTERM-ignoring grandchild hides behind.
     escalateTimer = setTimeout(() => {
       escalateTimer = undefined
       signalGroup(pid, 'SIGKILL')
-      drainTimer = setTimeout(() => forceSettle(), escalateMs)
-    }, escalateMs)
+      startDrain()
+    }, BACKSTOP_FACTOR * escalateMs)
+  }
+
+  // After the stop, the pipes get one more grace to close: a process
+  // that left the group can hold them open forever.
+  const startDrain = () => {
+    if (settled || drainTimer !== undefined) return
+    drainTimer = setTimeout(() => forceSettle(), escalateMs)
   }
 
   const result = new Promise<SpawnResult>((resolve, reject) => {
@@ -146,6 +182,7 @@ export function spawnProcess(opts: SpawnOptions): Child {
 
     let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined
     let streamsEnded = false
+    let report = ''
 
     const finish = () => {
       if (settled) return
@@ -161,9 +198,17 @@ export function spawnProcess(opts: SpawnOptions): Child {
       } else {
         pruneWhenGone(pid)
       }
+      const reported = parseLifelineReport(report)
+      if (reported?.kind === 'spawnError') {
+        reject(spawnError(command, opts.cwd, lifelineError(reported)))
+        return
+      }
+      // The command's own end, when the lifeline lived to report it: the
+      // lifeline itself may have died with its group.
+      const ended = reported ?? exit
       resolve({
-        exitCode: exit?.code ?? null,
-        signal: exit?.signal ?? null,
+        exitCode: ended?.code ?? null,
+        signal: ended?.signal ?? null,
         timedOut,
         killed,
         durationMs: Date.now() - started,
@@ -175,16 +220,23 @@ export function spawnProcess(opts: SpawnOptions): Child {
       proc.stdout.destroy()
       proc.stderr.destroy()
       proc.stdin.destroy()
+      lifeline.destroy()
       finish()
     }
 
     proc.once('exit', (code, signal) => {
       exit = { code, signal }
       if (streamsEnded) finish()
+      // A stopped lifeline exits only once its group is gone or SIGKILLed.
+      else if (killed) startDrain()
     })
     void Promise.all([
       readStream(proc.stdout, opts.onStdout, opts.onStdoutChunk),
       readStream(proc.stderr, opts.onStderr, opts.onStderrChunk),
+      // Read to its end, so a spawn error is in before the result settles.
+      readStream(lifeline, undefined, (chunk) => {
+        report += chunk.toString('utf8')
+      }),
     ]).then(() => {
       streamsEnded = true
       if (exit) finish()
@@ -225,6 +277,14 @@ function spawnError(command: string, cwd: string, err: NodeJS.ErrnoException): R
     return new RensaError('PROCESS', `cannot run \`${command}\`: ${why}`)
   }
   return new RensaError('PROCESS', `cannot run \`${command}\`: ${err.message}`)
+}
+
+function lifelineError(
+  failed: Extract<LifelineReport, { kind: 'spawnError' }>,
+): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(failed.message)
+  if (failed.code !== undefined) err.code = failed.code
+  return err
 }
 
 /** True while any member of the process group lives. */

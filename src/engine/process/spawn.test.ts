@@ -151,10 +151,11 @@ describe('spawn failures', () => {
     const err = await child.result.catch((e: unknown) => e)
 
     assert(err instanceof RensaError, `expected RensaError, got ${String(err)}`)
+    // The lifeline started, so there is a group even though the command never ran.
     expect([err.code, err.message, child.pid]).toEqual([
       'PROCESS',
       expect.stringContaining('rensa-no-such-binary-4f1c'),
-      undefined,
+      expect.any(Number),
     ])
   })
 
@@ -205,10 +206,14 @@ describe('killing the process group', () => {
     const child = spawnProcess(options({ argv: KILLED_SLEEP.split(' ') }))
     await waitForProcesses(KILLED_SLEEP, 1)
 
+    const killedAt = Date.now()
     child.kill()
     const result = await child.result
+    const settledAfterMs = Date.now() - killedAt
 
+    // Well before the 5 s grace: nothing in the group outlives the SIGTERM.
     expect(result).toMatchObject({ killed: true, timedOut: false, signal: 'SIGTERM' })
+    expect(settledAfterMs).toBeLessThan(2_000)
   })
 
   it('escalates to SIGKILL for a TERM-ignoring grandchild when the leader exits first', async () => {
@@ -228,7 +233,8 @@ describe('killing the process group', () => {
     const settledAfterMs = Date.now() - killedAt
 
     expect(registeredAfter100ms).toBe(true)
-    expect(result.killed).toBe(true)
+    // The command's own end, though the lifeline died with the group.
+    expect(result).toMatchObject({ killed: true, signal: 'SIGTERM' })
     expect(settledAfterMs).toBeLessThan(1_000)
     await waitUntilGone(TERM_IGNORING_SLEEP)
     await vi.waitFor(() => expect(liveProcessGroups.has(pgid)).toBe(false), { timeout: 3_000 })

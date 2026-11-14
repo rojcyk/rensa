@@ -72,6 +72,7 @@ export async function engineRepo(chains: readonly string[]): Promise<EngineRepo>
   const projectDir = path.join(repo.dir, '.rensa')
   await installChains(repo.dir, chains)
   const handles: RunHandle[] = []
+  const engines: Engine[] = []
   return {
     repo,
     home,
@@ -79,6 +80,7 @@ export async function engineRepo(chains: readonly string[]): Promise<EngineRepo>
     lockFile: path.join(projectDir, 'lock'),
     async open() {
       const engine = await Engine.open(repo.dir)
+      engines.push(engine)
       await commitAll(repo.dir)
       return engine
     },
@@ -90,6 +92,9 @@ export async function engineRepo(chains: readonly string[]): Promise<EngineRepo>
     async cleanup() {
       for (const handle of handles) handle.abort()
       await Promise.allSettled(handles.map((h) => within(h.done, 10_000, `run ${h.id} to end`)))
+      // The provider checks run the real CLIs with `home` as HOME, and
+      // those write there; removing it under them fails with ENOTEMPTY.
+      await Promise.all(engines.map((e) => e.providersChecked))
       vi.unstubAllEnvs()
       await Promise.all([repo.cleanup(), home.cleanup()])
     },

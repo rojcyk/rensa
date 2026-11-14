@@ -1,0 +1,4 @@
+description: A long shell step for SIGKILLing rensa while it runs.
+steps:
+  - id: wait
+    run: sleep 30.6533
