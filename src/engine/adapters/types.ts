@@ -35,6 +35,16 @@ export type Availability =
   | { status: 'not_logged_in'; version: string; hint: string }
   | { status: 'ready'; version: string }
 
+export interface AvailabilityOptions {
+  /**
+   * How long each probe command (`--version`, the login check) may run
+   * before it is answered as "could not run". Default 2000 ms, sized to
+   * fit `checkProviders`' 3 s budget; tests that read a probe's output
+   * pass a longer one so a slow machine cannot change their answer.
+   */
+  commandTimeoutMs?: number
+}
+
 export interface SpawnRequest {
   cwd: string
   /** Already stripped of API keys by the engine (`childEnv`). */

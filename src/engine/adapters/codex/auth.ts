@@ -1,7 +1,7 @@
 import { diag } from '../../diag.js'
 import { spawnProcess } from '../../process/spawn.js'
 import { findOnPath } from '../path.js'
-import type { Availability } from '../types.js'
+import type { Availability, AvailabilityOptions } from '../types.js'
 
 const SCOPE = 'codex.auth'
 // `checkProviders` counts its 3 s from before `available()` is called and
@@ -27,16 +27,26 @@ type CommandOutput =
  * with "not supported when using Codex with a ChatGPT account"), so the
  * model is not advisory and availability carries no note about it.
  */
-export async function codexAvailability(env: NodeJS.ProcessEnv): Promise<Availability> {
+export async function codexAvailability(
+  env: NodeJS.ProcessEnv,
+  { commandTimeoutMs = COMMAND_TIMEOUT_MS }: AvailabilityOptions = {},
+): Promise<Availability> {
   const bin = await findOnPath('codex', env)
   if (bin === undefined) return { status: 'not_installed' }
-  const [version, loggedIn] = await Promise.all([readVersion(bin, env), readLoggedIn(bin, env)])
+  const [version, loggedIn] = await Promise.all([
+    readVersion(bin, env, commandTimeoutMs),
+    readLoggedIn(bin, env, commandTimeoutMs),
+  ])
   if (!loggedIn) return { status: 'not_logged_in', version, hint: 'run: codex login' }
   return { status: 'ready', version }
 }
 
-async function readVersion(bin: string, env: NodeJS.ProcessEnv): Promise<string> {
-  const out = await runCommand([bin, '--version'], env)
+async function readVersion(
+  bin: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<string> {
+  const out = await runCommand([bin, '--version'], env, timeoutMs)
   if (!out.ran) {
     diag(SCOPE, `codex --version failed: ${out.reason}`)
     return UNKNOWN_VERSION
@@ -44,8 +54,12 @@ async function readVersion(bin: string, env: NodeJS.ProcessEnv): Promise<string>
   return parseVersion(out.stdout) ?? UNKNOWN_VERSION
 }
 
-async function readLoggedIn(bin: string, env: NodeJS.ProcessEnv): Promise<boolean> {
-  const out = await runCommand([bin, 'login', 'status'], env)
+async function readLoggedIn(
+  bin: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<boolean> {
+  const out = await runCommand([bin, 'login', 'status'], env, timeoutMs)
   if (!out.ran) {
     diag(SCOPE, `codex login status failed, assuming logged in: ${out.reason}`)
     return true
@@ -78,15 +92,19 @@ export function parseLoginStatus(output: string, exitCode: number | null): boole
 
 /**
  * The command's exit code and output, or why it could not run to
- * completion. Answers by `COMMAND_TIMEOUT_MS` at the latest; a command
+ * completion. Answers by `timeoutMs` at the latest; a command
  * still running then is killed, and its exit is not waited for.
  */
-async function runCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<CommandOutput> {
+async function runCommand(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<CommandOutput> {
   const stdout: string[] = []
   const stderr: string[] = []
   const timedOut: CommandOutput = {
     ran: false,
-    reason: `timed out after ${COMMAND_TIMEOUT_MS} ms`,
+    reason: `timed out after ${timeoutMs} ms`,
   }
   let timer: NodeJS.Timeout | undefined
   try {
@@ -94,7 +112,7 @@ async function runCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<Comma
       argv,
       cwd: process.cwd(),
       env,
-      timeoutMs: COMMAND_TIMEOUT_MS,
+      timeoutMs,
       escalateMs: COMMAND_KILL_GRACE_MS,
       onStdout: (line) => stdout.push(line),
       onStderr: (line) => stderr.push(line),
@@ -104,7 +122,7 @@ async function runCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<Comma
         // Idempotent with spawnProcess's own timeout kill; only the wait is skipped.
         child.kill()
         resolve('deadline')
-      }, COMMAND_TIMEOUT_MS)
+      }, timeoutMs)
     })
     const result = await Promise.race([child.result, deadline])
     if (result === 'deadline' || result.timedOut) return timedOut

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { diag } from '../../diag.js'
 import { spawnProcess } from '../../process/spawn.js'
 import { findOnPath } from '../path.js'
-import type { Availability } from '../types.js'
+import type { Availability, AvailabilityOptions } from '../types.js'
 
 const SCOPE = 'grok.auth'
 // `checkProviders` counts its 3 s from before `available()` is called and
@@ -20,10 +20,16 @@ const UNKNOWN_VERSION = 'unknown'
  * file exists, which cannot show an expired login: that surfaces at run
  * time as an `auth` error.
  */
-export async function grokAvailability(env: NodeJS.ProcessEnv): Promise<Availability> {
+export async function grokAvailability(
+  env: NodeJS.ProcessEnv,
+  { commandTimeoutMs = COMMAND_TIMEOUT_MS }: AvailabilityOptions = {},
+): Promise<Availability> {
   const bin = await findOnPath('grok', env)
   if (bin === undefined) return { status: 'not_installed' }
-  const [version, loggedIn] = await Promise.all([readVersion(bin, env), hasCredentials(env)])
+  const [version, loggedIn] = await Promise.all([
+    readVersion(bin, env, commandTimeoutMs),
+    hasCredentials(env),
+  ])
   if (!loggedIn) return { status: 'not_logged_in', version, hint: 'run: grok login' }
   return { status: 'ready', version }
 }
@@ -57,7 +63,11 @@ export function parseVersion(stdout: string): string | undefined {
 }
 
 /** `grok --version`, or `unknown` when it cannot run to completion; the reason goes to `diag`. */
-async function readVersion(bin: string, env: NodeJS.ProcessEnv): Promise<string> {
+async function readVersion(
+  bin: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<string> {
   const lines: string[] = []
   let timer: NodeJS.Timeout | undefined
   try {
@@ -65,7 +75,7 @@ async function readVersion(bin: string, env: NodeJS.ProcessEnv): Promise<string>
       argv: [bin, '--version'],
       cwd: process.cwd(),
       env,
-      timeoutMs: COMMAND_TIMEOUT_MS,
+      timeoutMs,
       escalateMs: COMMAND_KILL_GRACE_MS,
       onStdout: (line) => lines.push(line),
     })
@@ -74,11 +84,11 @@ async function readVersion(bin: string, env: NodeJS.ProcessEnv): Promise<string>
         // Idempotent with spawnProcess's own timeout kill; only the wait is skipped.
         child.kill()
         resolve('deadline')
-      }, COMMAND_TIMEOUT_MS)
+      }, timeoutMs)
     })
     const result = await Promise.race([child.result, deadline])
     if (result === 'deadline' || result.timedOut) {
-      diag(SCOPE, `grok --version timed out after ${COMMAND_TIMEOUT_MS} ms`)
+      diag(SCOPE, `grok --version timed out after ${timeoutMs} ms`)
       return UNKNOWN_VERSION
     }
     if (result.signal !== null) {

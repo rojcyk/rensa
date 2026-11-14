@@ -1,7 +1,9 @@
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { vi } from 'vitest'
 import {
   Engine,
+  PROVIDERS,
   type RunEvent,
   type RunHandle,
   type RunInput,
@@ -14,18 +16,36 @@ import { type TmpDir, type TmpRepo, tmpDir, tmpRepo } from './tmpRepo.js'
 /**
  * Environment every engine test needs: the fake provider registered, a
  * home directory of the test's own (so no user config or `~` skill leaks
- * in), and no `RENSA_FAKE_*` hook inherited from the shell. Undone by
- * `vi.unstubAllEnvs()`.
+ * in), no vendor CLI on PATH, and no `RENSA_FAKE_*` hook inherited from
+ * the shell. Undone by `vi.unstubAllEnvs()`.
  */
 export function stubEngineEnv(home: string): void {
   vi.stubEnv('RENSA_DEV', '1')
   vi.stubEnv('HOME', home)
+  vi.stubEnv('PATH', withoutVendorClis(process.env.PATH ?? ''))
   vi.stubEnv('XDG_CONFIG_HOME', undefined)
   vi.stubEnv('GIT_DIR', undefined)
   vi.stubEnv('GIT_WORK_TREE', undefined)
   for (const key of Object.keys(process.env)) {
     if (key.startsWith('RENSA_FAKE_')) vi.stubEnv(key, undefined)
   }
+}
+
+const VENDOR_CLIS = PROVIDERS.filter((p) => p !== 'fake')
+
+/**
+ * `pathVar` without the directories that hold a vendor CLI. `Engine.open`
+ * checks every provider, and a real `claude` or `codex` found on PATH
+ * runs its version and auth commands: about a second of CPU each, many
+ * times over in a full suite, which starves the auth tests' fake CLIs
+ * past their 2 s deadline. Any other tool in a dropped directory (git,
+ * say) is then found further down PATH, as in `/usr/bin`.
+ */
+function withoutVendorClis(pathVar: string): string {
+  return pathVar
+    .split(path.delimiter)
+    .filter((dir) => !VENDOR_CLIS.some((bin) => existsSync(path.join(dir, bin))))
+    .join(path.delimiter)
 }
 
 export interface EngineRepo {

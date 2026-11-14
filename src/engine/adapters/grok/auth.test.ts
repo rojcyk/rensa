@@ -6,12 +6,19 @@ import { killProcessesWithArgs } from '../../../testing/processes.js'
 import { type TmpDir, tmpDir } from '../../../testing/tmpRepo.js'
 import { drainDiag } from '../../diag.js'
 import { checkProviders } from '../available.js'
-import type { Availability } from '../types.js'
+import type { Availability, AvailabilityOptions } from '../types.js'
 import { authFile, grokAvailability, parseVersion } from './auth.js'
 import { grokAdapter } from './index.js'
 
 // `grok --version` as observed on Grok Build 1.0.70.
 const VERSION = 'grok 1.0.70 (f50904eaee6c) [stable]'
+
+// Tests that check how probe output is read get a deadline no loaded
+// machine misses: under a full parallel suite the fake CLIs below have
+// taken up to 2 s to run. Only the tests of the deadline itself use the
+// 2 s default. The test timeout is raised to match.
+const READ_OUTPUT: AvailabilityOptions = { commandTimeoutMs: 10_000 }
+const SLOW_PROBE = { timeout: 15_000 }
 
 let tmp: TmpDir
 
@@ -79,11 +86,11 @@ describe('availability when grok is not installed', () => {
   })
 })
 
-describe('availability from the credentials file', () => {
+describe('availability from the credentials file', SLOW_PROBE, () => {
   it('reports ready with the version when HOME holds .grok/auth.json', async () => {
     const env = { PATH: await installGrok(), HOME: await home('alice', true) }
 
-    const availability = await grokAvailability(env)
+    const availability = await grokAvailability(env, READ_OUTPUT)
 
     const expected: Availability = { status: 'ready', version: VERSION }
     expect(availability).toEqual(expected)
@@ -92,7 +99,7 @@ describe('availability from the credentials file', () => {
   it('reports not_logged_in with the login hint when HOME has no .grok/auth.json', async () => {
     const env = { PATH: await installGrok(), HOME: await home('alice', false) }
 
-    const availability = await grokAvailability(env)
+    const availability = await grokAvailability(env, READ_OUTPUT)
 
     expect(availability).toEqual(NOT_LOGGED_IN)
   })
@@ -104,7 +111,10 @@ describe('availability from the credentials file', () => {
       GROK_HOME: await grokHome('grok-home', true),
     }
 
-    await expect(grokAvailability(env)).resolves.toEqual({ status: 'ready', version: VERSION })
+    await expect(grokAvailability(env, READ_OUTPUT)).resolves.toEqual({
+      status: 'ready',
+      version: VERSION,
+    })
   })
 
   it('reports not_logged_in when GROK_HOME has no auth.json even if HOME has one', async () => {
@@ -114,7 +124,7 @@ describe('availability from the credentials file', () => {
       GROK_HOME: await grokHome('grok-home', false),
     }
 
-    await expect(grokAvailability(env)).resolves.toEqual(NOT_LOGGED_IN)
+    await expect(grokAvailability(env, READ_OUTPUT)).resolves.toEqual(NOT_LOGGED_IN)
   })
 })
 
@@ -130,11 +140,11 @@ describe('where grok keeps its credentials', () => {
   })
 })
 
-describe('availability when grok --version cannot run to completion', () => {
+describe('availability when grok --version cannot run to completion', SLOW_PROBE, () => {
   it('reports the version as unknown and records why in diag when --version dies from a signal', async () => {
     const env = { PATH: await installGrok('kill -KILL $$'), HOME: await home('alice', true) }
 
-    const availability = await grokAvailability(env)
+    const availability = await grokAvailability(env, READ_OUTPUT)
 
     expect(availability).toEqual({ status: 'ready', version: 'unknown' })
     expect(drainDiag().map((e) => e.scope)).toEqual(['grok.auth'])

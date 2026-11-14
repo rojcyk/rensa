@@ -6,7 +6,7 @@ import { killProcessesWithArgs, processesWithArgs } from '../../../testing/proce
 import { type TmpDir, tmpDir } from '../../../testing/tmpRepo.js'
 import { drainDiag } from '../../diag.js'
 import { checkProviders } from '../available.js'
-import type { Availability } from '../types.js'
+import type { Availability, AvailabilityOptions } from '../types.js'
 import { claudeAvailability, parseAuthStatus, parseVersion } from './auth.js'
 import { claudeAdapter } from './index.js'
 
@@ -35,6 +35,13 @@ const LOGGED_OUT_STATUS = `{
   "loginExpiresAt": null
 }`
 const VERSION = '2.1.319 (Claude Code)'
+
+// Tests that check how probe output is read get a deadline no loaded
+// machine misses: under a full parallel suite the fake CLIs below have
+// taken up to 2 s to run. Only the tests of the deadline itself use the
+// 2 s default. The test timeout is raised to match.
+const READ_OUTPUT: AvailabilityOptions = { commandTimeoutMs: 10_000 }
+const SLOW_PROBE = { timeout: 15_000 }
 
 let tmp: TmpDir
 
@@ -89,11 +96,11 @@ describe('availability when claude is not installed', () => {
   })
 })
 
-describe('availability from the observed claude auth status output', () => {
+describe('availability from the observed claude auth status output', SLOW_PROBE, () => {
   it('reports ready with the version when auth status prints loggedIn true and exits 0', async () => {
     const env = await installClaude(`${print(LOGGED_IN_STATUS)}\nexit 0`)
 
-    const availability = await claudeAvailability(env)
+    const availability = await claudeAvailability(env, READ_OUTPUT)
 
     const expected: Availability = { status: 'ready', version: VERSION }
     expect(availability).toEqual(expected)
@@ -102,7 +109,7 @@ describe('availability from the observed claude auth status output', () => {
   it('reports not_logged_in with the login hint when auth status prints loggedIn false and exits 1', async () => {
     const env = await installClaude(`${print(LOGGED_OUT_STATUS)}\nexit 1`)
 
-    const availability = await claudeAvailability(env)
+    const availability = await claudeAvailability(env, READ_OUTPUT)
 
     const expected: Availability = {
       status: 'not_logged_in',
@@ -115,27 +122,34 @@ describe('availability from the observed claude auth status output', () => {
   it('believes loggedIn false over exit code 0 when the JSON says logged out', async () => {
     const env = await installClaude(`${print(LOGGED_OUT_STATUS)}\nexit 0`)
 
-    await expect(claudeAvailability(env)).resolves.toMatchObject({ status: 'not_logged_in' })
+    await expect(claudeAvailability(env, READ_OUTPUT)).resolves.toMatchObject({
+      status: 'not_logged_in',
+    })
   })
 
   it('reports ready when auth status prints no JSON and exits 0', async () => {
     const env = await installClaude(`echo 'Logged in as alice@example.com'\nexit 0`)
 
-    await expect(claudeAvailability(env)).resolves.toEqual({ status: 'ready', version: VERSION })
+    await expect(claudeAvailability(env, READ_OUTPUT)).resolves.toEqual({
+      status: 'ready',
+      version: VERSION,
+    })
   })
 
   it('reports not_logged_in when auth status prints no JSON and exits 1', async () => {
     const env = await installClaude(`echo 'Not logged in'\nexit 1`)
 
-    await expect(claudeAvailability(env)).resolves.toMatchObject({ status: 'not_logged_in' })
+    await expect(claudeAvailability(env, READ_OUTPUT)).resolves.toMatchObject({
+      status: 'not_logged_in',
+    })
   })
 })
 
-describe('availability when claude auth status cannot run', () => {
+describe('availability when claude auth status cannot run', SLOW_PROBE, () => {
   it('reports ready and records why in diag when auth status dies from a signal', async () => {
     const env = await installClaude('kill -KILL $$')
 
-    const availability = await claudeAvailability(env)
+    const availability = await claudeAvailability(env, READ_OUTPUT)
 
     expect(availability).toEqual({ status: 'ready', version: VERSION })
     expect(drainDiag().map((e) => e.scope)).toEqual(['claude.auth'])
@@ -152,16 +166,18 @@ describe('availability when claude auth status cannot run', () => {
       const availability = await claudeAvailability(env)
       const stillRunning = await processesWithArgs(`sleep ${sleep}`)
 
-      expect(availability).toEqual({ status: 'ready', version: VERSION })
+      // Only the auth answer is under test: `--version` shares the 2 s
+      // deadline and may miss it on a loaded machine.
+      expect(availability).toMatchObject({ status: 'ready' })
       // Answered at the 2 s deadline, inside the SIGTERM → SIGKILL grace.
       expect(stillRunning).toHaveLength(1)
       await vi.waitFor(async () => expect(await processesWithArgs(`sleep ${sleep}`)).toEqual([]), {
         timeout: 5_000,
         interval: 100,
       })
-      const diags = drainDiag()
-      expect(diags.map((e) => e.scope)).toEqual(['claude.auth'])
-      expect(diags[0]?.message).toContain('timed out')
+      expect(drainDiag().map((e) => e.message)).toContain(
+        'claude auth status failed, assuming logged in: timed out after 2000 ms',
+      )
       expect(stderr).not.toHaveBeenCalled()
     } finally {
       await killProcessesWithArgs(`sleep ${sleep}`)
@@ -177,9 +193,9 @@ describe('availability when claude auth status cannot run', () => {
     try {
       const statuses = await checkProviders(env, [claudeAdapter])
 
-      expect(statuses).toEqual([
-        { provider: 'claude', availability: { status: 'ready', version: VERSION } },
-      ])
+      // Only the auth answer is under test: `--version` shares the 2 s
+      // deadline and may miss it on a loaded machine.
+      expect(statuses).toMatchObject([{ provider: 'claude', availability: { status: 'ready' } }])
     } finally {
       await killProcessesWithArgs(`sleep ${sleep}`)
     }

@@ -6,7 +6,7 @@ import { killProcessesWithArgs } from '../../../testing/processes.js'
 import { type TmpDir, tmpDir } from '../../../testing/tmpRepo.js'
 import { drainDiag } from '../../diag.js'
 import { checkProviders } from '../available.js'
-import type { Availability } from '../types.js'
+import type { Availability, AvailabilityOptions } from '../types.js'
 import { codexAvailability, parseLoginStatus, parseVersion } from './auth.js'
 import { codexAdapter } from './index.js'
 
@@ -16,6 +16,13 @@ import { codexAdapter } from './index.js'
 const VERSION = 'codex-cli 0.166.0'
 const LOGGED_IN = 'Logged in using ChatGPT'
 const NOT_LOGGED_IN = 'Not logged in'
+
+// Tests that check how probe output is read get a deadline no loaded
+// machine misses: under a full parallel suite the fake CLIs below have
+// taken up to 2 s to run. Only the tests of the deadline itself use the
+// 2 s default. The test timeout is raised to match.
+const READ_OUTPUT: AvailabilityOptions = { commandTimeoutMs: 10_000 }
+const SLOW_PROBE = { timeout: 15_000 }
 
 let tmp: TmpDir
 
@@ -77,11 +84,11 @@ describe('availability when codex is not installed', () => {
   })
 })
 
-describe('availability from the observed codex login status output', () => {
+describe('availability from the observed codex login status output', SLOW_PROBE, () => {
   it('reports ready with the version and no note when login status says logged in on stderr and exits 0', async () => {
     const env = await installCodex(`echo '${LOGGED_IN}' >&2\nexit 0`)
 
-    const availability = await codexAvailability(env)
+    const availability = await codexAvailability(env, READ_OUTPUT)
 
     const expected: Availability = { status: 'ready', version: VERSION }
     expect(availability).toEqual(expected)
@@ -90,7 +97,7 @@ describe('availability from the observed codex login status output', () => {
   it('reports not_logged_in with the login hint when login status says not logged in on stderr and exits 1', async () => {
     const env = await installCodex(`echo '${NOT_LOGGED_IN}' >&2\nexit 1`)
 
-    const availability = await codexAvailability(env)
+    const availability = await codexAvailability(env, READ_OUTPUT)
 
     expect(availability).toEqual(NOT_LOGGED_IN_AVAILABILITY)
   })
@@ -98,21 +105,21 @@ describe('availability from the observed codex login status output', () => {
   it('reports not_logged_in when login status prints Not logged in on stdout even though it exits 0', async () => {
     const env = await installCodex(`echo '${NOT_LOGGED_IN}'\nexit 0`)
 
-    await expect(codexAvailability(env)).resolves.toEqual(NOT_LOGGED_IN_AVAILABILITY)
+    await expect(codexAvailability(env, READ_OUTPUT)).resolves.toEqual(NOT_LOGGED_IN_AVAILABILITY)
   })
 
   it('reports not_logged_in when login status exits 1 and prints nothing', async () => {
     const env = await installCodex('exit 1')
 
-    await expect(codexAvailability(env)).resolves.toEqual(NOT_LOGGED_IN_AVAILABILITY)
+    await expect(codexAvailability(env, READ_OUTPUT)).resolves.toEqual(NOT_LOGGED_IN_AVAILABILITY)
   })
 })
 
-describe('availability when codex login status cannot run', () => {
+describe('availability when codex login status cannot run', SLOW_PROBE, () => {
   it('reports ready and records why in diag when login status dies from a signal', async () => {
     const env = await installCodex('kill -KILL $$')
 
-    const availability = await codexAvailability(env)
+    const availability = await codexAvailability(env, READ_OUTPUT)
 
     expect(availability).toEqual({ status: 'ready', version: VERSION })
     expect(drainDiag().map((e) => e.scope)).toEqual(['codex.auth'])
@@ -127,23 +134,23 @@ describe('availability when codex login status cannot run', () => {
     try {
       const statuses = await checkProviders(env, [codexAdapter])
 
-      expect(statuses).toEqual([
-        { provider: 'codex', availability: { status: 'ready', version: VERSION } },
-      ])
-      const diags = drainDiag()
-      expect(diags.map((e) => e.scope)).toEqual(['codex.auth'])
-      expect(diags[0]?.message).toContain('timed out')
+      // Only the login answer is under test: `--version` shares the 2 s
+      // deadline and may miss it on a loaded machine.
+      expect(statuses).toMatchObject([{ provider: 'codex', availability: { status: 'ready' } }])
+      expect(drainDiag().map((e) => e.message)).toContain(
+        'codex login status failed, assuming logged in: timed out after 2000 ms',
+      )
     } finally {
       await killProcessesWithArgs(`sleep ${sleep}`)
     }
   })
 })
 
-describe('availability when codex --version cannot run to completion', () => {
+describe('availability when codex --version cannot run to completion', SLOW_PROBE, () => {
   it('reports the version as unknown and records why in diag when --version dies from a signal', async () => {
     const env = await installCodex(`echo '${LOGGED_IN}' >&2\nexit 0`, 'kill -KILL $$')
 
-    const availability = await codexAvailability(env)
+    const availability = await codexAvailability(env, READ_OUTPUT)
 
     expect(availability).toEqual({ status: 'ready', version: 'unknown' })
     expect(drainDiag().map((e) => e.scope)).toEqual(['codex.auth'])
@@ -152,7 +159,7 @@ describe('availability when codex --version cannot run to completion', () => {
   it('keeps the login hint with an unknown version when --version fails and login status says not logged in', async () => {
     const env = await installCodex(`echo '${NOT_LOGGED_IN}' >&2\nexit 1`, 'kill -KILL $$')
 
-    await expect(codexAvailability(env)).resolves.toEqual({
+    await expect(codexAvailability(env, READ_OUTPUT)).resolves.toEqual({
       status: 'not_logged_in',
       version: 'unknown',
       hint: 'run: codex login',
